@@ -326,24 +326,14 @@ def test_fallback_is_separate_and_labelled(context):
 
 
 def test_launcher_matches_a_contract_and_keeps_secrets_local():
-    launcher = (ROOT / "scripts" / "launcher.ps1").read_text()
     batch = (ROOT / "launcher.cmd").read_text()
     manifest = json.loads((ROOT / "scripts" / "uv-manifest.json").read_text())
-    assert "app.main:app" in launcher and "career_quest.main" not in launcher
-    assert "CAREERQUEST_DATA_DIR" in launcher and "CAREER_QUEST_DATA_DIR" not in launcher
-    assert "app.ai.provider:recommend" in launcher
-    assert "sync --locked --no-dev" in launcher
-    assert "hack-9be09345-jassai" in launcher
-    assert "Get-ApplicationReady" in launcher and "ready.ready -ne $true" in launcher
-    assert 'health.application -ne "career-quest"' in launcher
-    assert '"#setup_token="' in launcher and '"?setup_token="' not in launcher
-    assert "ConvertFrom-SecureString" in launcher and "Read-Host -AsSecureString" in launcher
-    assert "Remove-Item Env:OPENAI_API_KEY" in launcher
-    assert "ExecutionPolicy Bypass" not in launcher + batch
-    assert "WriteAllText($SecretPath" in launcher
-    assert (
-        "OPENAI_API_KEY"
-        not in launcher.split("-ArgumentList", 1)[1].split("-WorkingDirectory", 1)[0]
-    )
-    assert manifest["url"].startswith("https://github.com/astral-sh/uv/releases/download/")
+    # Runtime behavior is exercised in test_launcher_windows. This guards the
+    # distribution boundary: a verified binary, no PS1/policy workaround.
+    assert "run --no-project --managed-python" in batch
+    assert "scripts\\launcher.py" in batch
+    assert " -File " not in batch and "-EncodedCommand" not in batch
+    assert "ExecutionPolicy" not in batch
+    assert "Get-FileHash" in batch and "SHA256" in batch
+    assert manifest["url"] == f'https://github.com/astral-sh/uv/releases/download/{manifest["version"]}/{manifest["asset"]}'
     assert len(manifest["sha256"]) == 64

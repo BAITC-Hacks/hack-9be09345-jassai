@@ -1,0 +1,55 @@
+{
+  "meta": {
+    "dataset": "Career Quest — вымышленная демонстрационная выборка",
+    "version": "1.0",
+    "as_of_date": "2026-10-01",
+    "description": "Все профили созданы для демонстрации. Это не данные компании или организаторов. Учётных записей и паролей в выборке нет."
+  },
+  "employees": [
+    {
+      "employee_id": "DEMO_E001",
+      "full_name": "Демо Участник 01",
+      "department": "Демонстрационная разработка",
+      "role": "Инженер",
+      "grade": "Middle",
+      "manager_id": "DEMO_E003",
+      "hire_date": "2024-10-01",
+      "tenure_months": 24,
+      "work_format": "hybrid",
+      "preferred_language": "ru",
+      "career_goal": {"target_role": "Инженер", "target_grade": "Senior"},
+      "skills": {"DEMO_ARCH": 1, "DEMO_TEST": 2, "DEMO_COMM": 1, "DEMO_SQL": 1},
+      "last_review_date": "2026-09-10"
+    },
+    {
+      "employee_id": "DEMO_E002",
+      "full_name": "Демо Участник 02",
+      "department": "Демонстрационная аналитика",
+      "role": "Аналитик",
+      "grade": "Middle",
+      "manager_id": "DEMO_E003",
+      "hire_date": "2025-04-01",
+      "tenure_months": 18,
+      "work_format": "remote",
+      "preferred_language": "ru",
+      "career_goal": {"target_role": "Аналитик", "target_grade": "Senior"},
+      "skills": {"DEMO_ARCH": 0, "DEMO_TEST": 1, "DEMO_COMM": 1, "DEMO_SQL": 2},
+      "last_review_date": "2026-09-10"
+    },
+    {
+      "employee_id": "DEMO_E003",
+      "full_name": "Демо Руководитель 03",
+      "department": "Демонстрационная разработка",
+      "role": "Инженер",
+      "grade": "Lead",
+      "manager_id": null,
+      "hire_date": "2022-10-01",
+      "tenure_months": 48,
+      "work_format": "office",
+      "preferred_language": "ru",
+      "career_goal": null,
+      "skills": {"DEMO_ARCH": 4, "DEMO_TEST": 4, "DEMO_COMM": 3, "DEMO_SQL": 3},
+      "last_review_date": "2026-09-10"
+    }
+  ]
+}

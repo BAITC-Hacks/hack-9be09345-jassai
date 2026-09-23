@@ -1,0 +1,6 @@
+record_id,employee_id,event_id,date,due_date,status,completion_pct,score,feedback_rating,assigned_by
+DEMO_H001,DEMO_E001,DEMO_EV_SQL,2026-09-01,,completed,100,82,4,self
+DEMO_H002,DEMO_E001,DEMO_EV_ARCH_BASE,2026-09-20,,completed,100,88,5,self
+DEMO_H003,DEMO_E001,DEMO_EV_MAND,2026-09-25,2026-10-05,in_progress,40,,,hr
+DEMO_H004,DEMO_E002,DEMO_EV_FUTURE,2026-09-28,,declined,0,,,self
+DEMO_H005,DEMO_E002,DEMO_EV_ANALYSIS,2026-09-29,,in_progress,35,,,self

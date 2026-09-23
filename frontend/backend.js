@@ -1,4 +1,4 @@
-// Adapter for teammate A's published API_CONTRACT.md v1.0.
+// Adapter for the server API; its live schema is available at /openapi.json.
 // UI representations only: skills, eligibility and aggregate metrics come from A.
 import {label} from './ui.js';
 export function normalizeProfile(raw,catalog,rec=null){
