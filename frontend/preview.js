@@ -81,6 +81,7 @@ export function createPreview(mode='employee'){
     if(route==='/api/hr/employees')return {employees:people.map(({employee_id,full_name,role,grade,department})=>({employee_id,full_name,role,grade,department}))};
     if(route==='/api/hr/users')return {user:{username:body.username,role:'employee',employee_id:body.employee_id}};
     if(route==='/api/hr/overview')return overview(url.searchParams);
+    if(route==='/api/hr/import/starter'){if(user.role!=='hr')throw new ApiError('У вашей учётной записи нет доступа.',403);throw new ApiError('Стартовый набор доступен при подключении к локальному серверу. Предпросмотр не загружает реальные файлы.',409);}
     if(route==='/api/hr/import/validate')return {valid:true,batch_id:'DEMO_BATCH',counts:{added:1,updated:0,skipped:0},conflicts:[],errors:[]};
     if(route==='/api/hr/import/apply'){loaded=true;return {counts:{added:1,updated:0,skipped:0},employee_ids:['DEMO_PERSON'],account_instructions:'Это предпросмотр: реальные данные и аккаунты не создаются.'};}
     if(route==='/api/hr/settings/ai'&&method==='GET')return {providers:{openai:{configured:false},nvidia:{configured:false}},primary_provider:'openai',fallback_provider:'nvidia'};

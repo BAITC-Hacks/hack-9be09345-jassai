@@ -1,6 +1,9 @@
 // Adapter for the server API; its live schema is available at /openapi.json.
 // UI representations only: skills, eligibility and aggregate metrics come from A.
 import {label} from './ui.js';
+// Browser download suffixes do not define the schema. Known input slots do;
+// unknown filenames and all bytes still reach the server's strict validation.
+const importFileSlots=new Set(['employees.json','skills.json','events.json','activity_history.csv']);
 export function normalizeProfile(raw,catalog,rec=null){
   const skills=new Map((catalog.skills||[]).map(s=>[s.skill_id,s.name]));
   const events=new Map((catalog.events||[]).map(e=>[e.event_id,e]));
@@ -76,13 +79,17 @@ export function createBackendAdapter(rawApi){
     }
     if(path==='/api/hr/overview'||path.startsWith('/api/hr/overview?'))return normalizeOverview(await rawApi(path,options));
     if(path==='/api/hr/import/validate'){
-      const body=new FormData();for(const [key,value] of options.body.entries()){if(value instanceof File){if(value.name||value.size)body.append('files',value,value.name);}else if(key==='mode')body.set('mode',value);}
+      const body=new FormData();for(const [key,value] of options.body.entries()){if(value instanceof File){if(value.name||value.size)body.append('files',value,importFileSlots.has(key)?key:value.name);}else if(key==='mode')body.set('mode',value);}
       const r=await rawApi(path,{...options,body});return {...r,counts:sumCounts(r.counts),entity_counts:r.counts};
+    }
+    if(path==='/api/hr/import/starter'){
+      const r=await rawApi(path,options);return {...r,counts:sumCounts(r.counts),entity_counts:r.counts};
     }
     if(path==='/api/hr/import/apply'){
       const r=await rawApi(path,{...options,body:{batch_id:options.body.batch_id}});clear();
-      return {...r,counts:sumCounts(r.report.counts),account_instructions:'Создайте сотруднику учётную запись в разделе «Сотрудники», затем войдите под ней.'};
+      return {...r,counts:sumCounts(r.report.counts),account_instructions:'Для новых сотрудников создайте учётные записи в разделе «Сотрудники». Доступ существующих сотрудников сохраняется.'};
     }
     return rawApi(path,options);
   };
 }
+

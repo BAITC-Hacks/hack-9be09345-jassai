@@ -22,6 +22,7 @@ from app.config import Settings
 from app.db import Database, all_entities, bump_revision, encode, get_entity, get_meta, put_entity, revision, snapshot
 from app.domain import hr_overview, profile_view, recommendation_context, role_key
 from app.imports import MAX_FILE_BYTES, apply_validated, validate_files
+from app.seed import BUNDLED_DATA_DIR, read_seed_files, seed_dataset
 from app.gamification import choose_quest, clear_quest, gamification_view, set_enabled
 from app.companion import companion_view, equip_item
 from app.companion_chat import CompanionCoach, compact_facts
@@ -54,6 +55,7 @@ def create_app(settings=None, recommender=None):
     @asynccontextmanager
     async def lifespan(application):
         db.initialize()
+        seed_dataset(db, settings.seed_data_dir)
         auth.initialize_bootstrap(db, settings)
         provider = recommender
         if provider is None and settings.recommender:
@@ -321,6 +323,25 @@ def create_app(settings=None, recommender=None):
                 error(422, "invalid_period")
             return hr_overview(snapshot(conn), as_of, date_from.isoformat() if date_from else None, date_to.isoformat() if date_to else None)
 
+    def validate_import_batch(uploads, mode, user):
+        with db.connection(write=True) as conn:
+            report, incoming = validate_files(conn, uploads, mode)
+            if report["valid"]:
+                batch_id = uuid.uuid4().hex
+                conn.execute("DELETE FROM import_batches WHERE applied=0 AND created_at<?", (time.time() - 86400,))
+                conn.execute("INSERT INTO import_batches VALUES (?,?,?,?,?,0,?)", (batch_id, user["username"], revision(conn), encode(incoming), encode(report), time.time()))
+                report["batch_id"] = batch_id
+            return report
+
+    @app.post("/api/hr/import/starter")
+    def validate_starter_import(user=Depends(auth.current_user)):
+        auth.require_role(user, "hr")
+        try:
+            uploads = read_seed_files(BUNDLED_DATA_DIR)
+        except RuntimeError:
+            error(503, "starter_data_unavailable")
+        return validate_import_batch(uploads, "add", user)
+
     @app.post("/api/hr/import/validate")
     async def validate_import(files: list[UploadFile] = File(...), mode: str = Form("add"), user=Depends(auth.current_user)):
         auth.require_role(user, "hr")
@@ -336,16 +357,7 @@ def create_app(settings=None, recommender=None):
                 error(413, "file_too_large")
             uploads[file.filename] = content
 
-        def validate_and_store():
-            with db.connection(write=True) as conn:
-                report, incoming = validate_files(conn, uploads, mode)
-                if report["valid"]:
-                    batch_id = uuid.uuid4().hex
-                    conn.execute("DELETE FROM import_batches WHERE applied=0 AND created_at<?", (time.time() - 86400,))
-                    conn.execute("INSERT INTO import_batches VALUES (?,?,?,?,?,0,?)", (batch_id, user["username"], revision(conn), encode(incoming), encode(report), time.time()))
-                    report["batch_id"] = batch_id
-                return report
-        return await asyncio.to_thread(validate_and_store)
+        return await asyncio.to_thread(validate_import_batch, uploads, mode, user)
 
     @app.post("/api/hr/import/apply")
     def apply_import(body: ApplyImport, user=Depends(auth.current_user)):
