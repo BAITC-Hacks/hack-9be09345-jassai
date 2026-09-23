@@ -4,13 +4,35 @@ import {icon} from './icons.js';
 import * as view from './views.js';
 import {filterEvents} from './domain.js';
 import {createBackendAdapter} from './backend.js';
-import {gamificationView} from './gamification.js';
+import {companionView,companionCompletion} from './companion.js';
+import {mountCompanionChat} from './companion-chat.js';
 
 const main=document.querySelector('#main');
 const preview=new URLSearchParams(location.search).get('preview');
 const emptyCatalog=()=>({tab:'suitable',search:'',format:'',duration:'',skills:[]});
 const emptyEmployees=()=>({search:'',department:'',role:'',grade:''});
 const state={session:null,status:{},profile:null,gamification:null,completion:null,batch:null,routeVersion:0,importVersion:0,csrf:null,settings:null,catalog:emptyCatalog(),employees:null,employeeFilters:emptyEmployees(),overview:null,period:'all',reason:null,historyTab:'all',notifications:[]};
+Object.assign(state,{companion:null,companionTab:'home',selectedSkill:null,previewItem:null,chatMessages:[],celebrateNext:false});
+let mascot=null,chat=null,mountVersion=0,mascotManifest=null;
+function disposeCompanion(){mountVersion++;chat?.dispose();chat=null;mascot?.dispose();mascot=null;}
+async function mountCompanion(){
+  const version=++mountVersion,host=main.querySelector('[data-mascot-stage]');
+  chat=mountCompanionChat({getCsrf:()=>state.csrf,profile:state.profile,messages:state.chatMessages,onState:value=>mascot?.setState(value),onUnauthorized:()=>{resetPrivateState();renderRoute();},previewAnswer:preview?((message,context)=>previewChat(message,context)):null});
+  if(!host)return;
+  try{const [{mountMascot},manifest]=await Promise.all([import('./mascot-renderer.js'),mascotManifest??=(fetch('/static/mascot-assets.json',{cache:'no-cache'}).then(r=>r.ok?r.json():{}).catch(()=>({})))]);if(version!==mountVersion||!host.isConnected)return;mascot=mountMascot(host,{equipped:state.companion.equipped,wardrobe:state.companion.wardrobe,previewItem:state.previewItem,state:state.celebrateNext?'celebrate':'idle',modelUrl:manifest.modelUrl||null});state.celebrateNext=false;}
+  catch{if(host.isConnected)host.innerHTML='<div class="mascot-loading"><p>3D пока недоступно на этом устройстве. Древо, гардероб и подсказки работают.</p></div>';}
+}
+function renderCompanion(){disposeCompanion();main.innerHTML=companionView(state.companion,state.profile,{tab:state.companionTab,selectedSkill:state.selectedSkill,previewItem:state.previewItem});mountCompanion();}
+function previewChat(message,{event_id,skill_id}={}){
+  const branches=state.companion?.tree.branches||[],q=message.toLowerCase();
+  const branch=branches.find(b=>b.skill_id===skill_id)||branches.find(b=>b.current<b.required),activity=state.profile.available_steps.find(a=>a.event_id===event_id)||branch?.activities[0];
+  let text,ids=[];
+  if(/одежд|откро|наград|гардероб/.test(q)){const item=state.companion.next_unlock;text=item?`Следующее открытие — «${item.name}». ${item.requirement.label}: ${item.requirement.current} из ${item.requirement.target}.`:'В текущем гардеробе всё открыто.';if(!state.companion.enabled)text+=' Включите награды перед новым завершением.';}
+  else if(/прогресс|цель|куда/.test(q))text=`Покрытие требований цели: ${state.companion.tree.coverage_pct??'не рассчитано'}${state.companion.tree.coverage_pct==null?'':'%'}. Это показатель навыков, решение о повышении принимается отдельно.`;
+  else if(activity){const gains=branches.flatMap(b=>b.activities.filter(a=>a.event_id===activity.event_id).map(a=>`${b.name}: ${a.before} → ${a.after}`));text=`«${activity.title}» — ${activity.duration_hours} ч. После завершения: ${gains.join('; ')}. Откройте прогноз для влияния на цель.`;ids=[activity.event_id];}
+  else text='Древо показывает навыки учебного профиля. Выберите цель или посмотрите условия открытия одежды.';
+  return [{type:'delta',text:'Учебный пример. '+text+' Внешний AI не вызывается.'},{type:'done',source:'preview',event_ids:ids}];
+}
 let setupToken=new URLSearchParams(location.hash.slice(1)).get('setup_token');
 if(setupToken)history.replaceState(null,'',location.pathname+location.search+'#setup');
 let mock=null;
@@ -26,15 +48,15 @@ function remember(value){try{if(value)localStorage.setItem('cq:remembered-userna
 let noticeTimer;
 function notice(text,record=false){const target=document.querySelector('#notice');target.textContent=text;target.hidden=false;clearTimeout(noticeTimer);noticeTimer=setTimeout(()=>target.hidden=true,6500);if(record){state.notifications.unshift({text,time:new Date().toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})});state.notifications=state.notifications.slice(0,10);}}
 function keyFor(action,id){const key=`cq:pending:${state.session?.user_id}:${action}:${id}`;let value=sessionStorage.getItem(key);if(!value){value=crypto.randomUUID();sessionStorage.setItem(key,value);}return {value,clear:()=>sessionStorage.removeItem(key)};}
-function resetPrivateState(){closeDialogs();for(const d of dialogs())d.innerHTML='';Object.assign(state,{session:null,csrf:null,profile:null,gamification:null,completion:null,batch:null,settings:null,employees:null,overview:null,catalog:emptyCatalog(),employeeFilters:emptyEmployees(),period:'all',reason:null,historyTab:'all',notifications:[]});state.routeVersion++;}
+function resetPrivateState(){disposeCompanion();closeDialogs();for(const d of dialogs())d.innerHTML='';Object.assign(state,{session:null,csrf:null,profile:null,gamification:null,companion:null,companionTab:'home',selectedSkill:null,previewItem:null,chatMessages:[],celebrateNext:false,completion:null,batch:null,settings:null,employees:null,overview:null,catalog:emptyCatalog(),employeeFilters:emptyEmployees(),period:'all',reason:null,historyTab:'all',notifications:[]});state.routeVersion++;}
 function setRoute(next){closeDialogs();history.pushState(null,'',location.pathname+location.search+'#'+next);return renderRoute();}
 function landing(){history.replaceState(null,'',location.pathname+location.search+'#'+(state.session?.role==='hr'?'hr':'home'));}
 function navigation(){
-  const user=state.session,hr=user?.role==='hr',raw=route(),active=hr?(raw.startsWith('employee/')?'employees':raw==='home'?'hr':raw):(raw==='completion'?'history':raw==='achievements'?'home':raw);
+  const user=state.session,hr=user?.role==='hr',raw=route(),active=hr?(raw.startsWith('employee/')?'employees':raw==='home'?'hr':raw):(raw==='completion'?'history':raw==='achievements'?'companion':raw);
   document.body.classList.toggle('auth-mode',!user&&!state.status.setup_required);
   document.body.classList.toggle('setup-mode',state.status.setup_required===true);
   document.body.classList.toggle('has-preview',!!preview);
-  const links=!user?[]:hr?[['hr','home','Обзор команды'],['employees','users','Сотрудники'],['import','upload','Импорт данных'],['settings','settings','Настройки AI']]:[['home','home','Мой путь'],['skills','skills','Навыки'],['catalog','book','Активности'],['history','history','История']];
+  const links=!user?[]:hr?[['hr','home','Обзор команды'],['employees','users','Сотрудники'],['import','upload','Импорт данных'],['settings','settings','Настройки AI']]:[['home','home','Мой путь'],['companion','sparkles','Спутник'],['skills','skills','Навыки'],['catalog','book','Активности'],['history','history','История']];
   document.querySelector('#navigation').innerHTML=links.map(([id,symbol,text])=>`<a href="#${id}" class="${active===id?'active':''}" ${active===id?'aria-current="page"':''}>${icon(symbol)}<span>${text}</span></a>`).join('');
   const fullName=!hr&&state.profile?.employee?.full_name||user?.display_name||user?.username||'',initials=fullName.split(/\s+/).slice(0,2).map(x=>x[0]||'').join('').toUpperCase(),position=hr?'HR · Развитие команды':state.profile?.employee?`${state.profile.employee.role} · ${state.profile.employee.grade}`:'Личное пространство';
   document.querySelector('#identity').innerHTML=user?`<div class="identity"><span class="avatar">${e(initials)}</span><div><strong>${e(fullName)}</strong><small>${e(position)}</small></div></div>`:'';
@@ -46,12 +68,12 @@ function navigation(){
 async function loadSession(){const result=await api('/api/auth/session');state.session=result.user;state.csrf=result.csrf_token;}
 async function boot(){try{state.status=await api('/api/setup/status');if(!state.status.setup_required){try{await loadSession();}catch(error){if(error.status!==401)throw error;}}await renderRoute();}catch(error){navigation();main.innerHTML=view.heading('Halyk Career Quest','Не удалось открыть пространство','Проверьте, что локальный сервер запущен.')+view.errorView(error)+view.button('Повторить подключение','reconnect');}}
 function requireRole(role){if(state.session?.role!==role)throw new ApiError('Этот раздел недоступен для вашей роли.',403);}
-async function loadGamification(){if(preview)return null;try{return await api('/api/me/gamification');}catch(error){if(error.status===404)return null;throw error;}}
-function requireGamification(){requireRole('employee');if(preview||!state.gamification)throw new ApiError('Личные достижения доступны с подключённым серверным модулем.',404);}
+async function loadCompanion(){try{return await api('/api/me/companion');}catch(error){if(error.status===404)return null;throw error;}}
+function requireGamification(){requireRole('employee');if(!state.gamification)throw new ApiError('Личные достижения доступны с подключённым серверным модулем.',404);}
 function overviewPath(){if(state.period==='all'||!state.status.as_of_date)return '/api/hr/overview';const to=state.status.as_of_date,from=new Date(to+'T12:00:00Z');from.setUTCDate(from.getUTCDate()-Number(state.period)+1);return '/api/hr/overview?'+new URLSearchParams({date_from:from.toISOString().slice(0,10),date_to:to});}
 function disableSettings(){if(preview){for(const field of main.querySelectorAll('.provider-form input,.provider-form button,#ai-policy-form input,#ai-policy-form select,#ai-policy-form button'))field.disabled=true;main.insertAdjacentHTML('afterbegin','<div class="info">Предпросмотр: API-ключи не принимаются.</div>');}}
 async function renderRoute(){
-  const version=++state.routeVersion;state.importVersion++;state.batch=null;navigation();main.innerHTML=view.loadingView();const raw=route();
+  disposeCompanion();const version=++state.routeVersion;state.importVersion++;state.batch=null;navigation();main.innerHTML=view.loadingView();const raw=route();
   try{
     if(state.status.setup_required){main.innerHTML=view.setupView(state.status);return;}
     if(!state.session){main.innerHTML=view.loginView(remembered());return;}
@@ -62,15 +84,15 @@ async function renderRoute(){
     else if(raw==='import'){requireRole('hr');html=view.importView(!state.status.dataset_loaded);}
     else if(raw==='hr'||raw==='home'&&state.session.role==='hr'){requireRole('hr');if(!state.status.dataset_loaded)html=view.setupView(state.status);else{const data=await api(overviewPath());if(version!==state.routeVersion)return;state.overview=data;state.status.as_of_date=data.as_of_date||state.status.as_of_date;html=view.hrView(data,{period:state.period,reason:state.reason});}}
     else if(raw.startsWith('employee/')){requireRole('hr');const profile=await api('/api/hr/employees/'+encodeURIComponent(decodeURIComponent(raw.slice(9))));if(version!==state.routeVersion)return;state.profile=profile;html=view.hrProfileView(profile);}
-    else if(['home','skills','history','catalog','completion','achievements'].includes(raw)){
+    else if(['home','skills','history','catalog','completion','achievements','companion'].includes(raw)){
       requireRole('employee');const session=state.session;
-      const [profile,gamification]=await Promise.all([api('/api/me'),loadGamification()]);
+      const [profile,companion]=await Promise.all([api('/api/me'),loadCompanion()]);const gamification=companion;
       if(version!==state.routeVersion||session!==state.session)return;
-      state.profile=profile;state.gamification=gamification;state.status.as_of_date=profile.as_of_date||state.status.as_of_date;
-      html=raw==='achievements'?(gamification?gamificationView(gamification,profile):view.empty('Достижения пока недоступны',preview?'Предпросмотр показывает основной сценарий. Личные достижения работают с подключённым сервером.':'Текущая версия сервера ещё не поддерживает личные достижения. Основное пространство продолжает работать.','<a class="button secondary" href="#home">Вернуться на «Мой путь»</a>')):raw==='catalog'?view.availableView(profile,state.catalog):raw==='completion'?(state.completion?view.completionView(state.completion):view.empty('Результат доступен в истории','Откройте завершённую активность в истории развития.','<a class="button" href="#history">Открыть историю</a>')):view.employeeView(profile,{section:raw,historyTab:state.historyTab,completion:state.completion,gamification});
+      state.profile=profile;state.gamification=gamification;state.companion=companion;state.status.as_of_date=profile.as_of_date||state.status.as_of_date;
+      html=['achievements','companion'].includes(raw)?companionView(companion,profile,{tab:state.companionTab,selectedSkill:state.selectedSkill,previewItem:state.previewItem}):raw==='catalog'?view.availableView(profile,state.catalog):raw==='completion'?(state.completion?view.completionView(state.completion)+companionCompletion(state.completion,companion):view.empty('Результат доступен в истории','Откройте завершённую активность в истории развития.','<a class="button" href="#history">Открыть историю</a>')):view.employeeView(profile,{section:raw,historyTab:state.historyTab,completion:state.completion,gamification});
     }
     else html=view.empty('Такой страницы нет','Вернитесь в своё рабочее пространство.','<a class="button" href="#home">На главную</a>');
-    if(version!==state.routeVersion)return;main.innerHTML=html;navigation();if(raw==='settings')disableSettings();
+    if(version!==state.routeVersion)return;main.innerHTML=html;navigation();main.focus({preventScroll:true});window.scrollTo(0,0);if(raw==='settings')disableSettings();if(['companion','achievements'].includes(raw))await mountCompanion();
   }catch(error){if(version!==state.routeVersion)return;if(error.status===401){resetPrivateState();navigation();main.innerHTML=view.loginView(remembered());notice('Сессия завершена. Войдите снова.');}else main.innerHTML=view.errorView(error)+`<div class="card-actions">${view.button('Повторить','reload')}<a class="button secondary" href="#home">На главную</a></div>`;}
 }
 async function recommend(){const version=state.routeVersion,target=document.querySelector('#recommendation-content');if(!target||target.getAttribute('aria-busy')==='true')return;requireRole('employee');target.setAttribute('aria-busy','true');target.innerHTML=view.loadingView('Подбираем шаги с учётом цели и истории…');try{const result=await api('/api/me/recommendations',{method:'POST',body:{refresh:true},timeout:11000});if(version!==state.routeVersion)return;state.profile.recommendations=result;main.innerHTML=view.employeeView(state.profile,{completion:state.completion,gamification:state.gamification});}catch(error){if(version===state.routeVersion)target.innerHTML=view.errorView(error)+`<div class="card-actions">${view.button('Повторить подбор','recommend')}<a class="button secondary" href="#catalog">Открыть доступные активности</a></div>`;}finally{target.removeAttribute('aria-busy');}}
@@ -83,7 +105,12 @@ document.addEventListener('click',async event=>{
   if(action==='close-dialog'||action==='close-goal'){closeDialogs();return;}
   const account=state.session?.user_id,session=state.session;control.disabled=true;
   try{
-    if(action==='goal'){requireRole('employee');openDialog('goal-dialog',view.goalForm(state.profile));}
+    if(action==='companion-tab'){requireRole('employee');state.companionTab=id;state.previewItem=null;renderCompanion();}
+    else if(action==='companion-skill'){state.selectedSkill=id;state.companionTab='tree';renderCompanion();}
+    else if(action==='wardrobe-preview'){state.previewItem=id;state.companionTab='wardrobe';renderCompanion();}
+    else if(action==='wardrobe-equip'){requireRole('employee');const data=await api('/api/me/companion/equip',{method:'POST',body:{item_id:id}});if(session!==state.session)return;state.companion=data;state.gamification=data;state.previewItem=null;if(['companion','achievements'].includes(route()))renderCompanion();notice('Образ сохранён.',true);}
+    else if(action==='companion-ask'){requireRole('employee');if(state.companionTab!=='home'){state.companionTab='home';renderCompanion();}chat?.ask(control.dataset.question,{skill_id:control.dataset.skill||null,event_id:control.dataset.event||null});}
+    else if(action==='goal'){requireRole('employee');openDialog('goal-dialog',view.goalForm(state.profile));}
     else if(action==='event'||action==='forecast'||action==='skill'||action==='history-result'){requireRole('employee');openDialog('detail-dialog',action==='event'?view.activityDetail(state.profile,id):action==='forecast'?view.forecastView(state.profile,id):action==='skill'?view.skillDetail(state.profile,id):view.historyDetail(state.profile,id));}
     else if(action==='compare'){requireRole('employee');openDialog('overlay-dialog',view.compareView(state.profile));}
     else if(action==='filters'){requireRole('employee');openDialog('detail-dialog',view.filtersView(state.profile,state.catalog));}
@@ -113,7 +140,7 @@ document.addEventListener('click',async event=>{
     else if(action==='start'||action==='complete'){
       requireRole('employee');const key=keyFor(action,id),result=await api(action==='start'?'/api/me/activities':`/api/me/activities/${encodeURIComponent(id)}/complete`,{method:'POST',idempotencyKey:key.value,body:action==='start'?{event_id:id,session_date:control.dataset.session||null}:{}});key.clear();if(account!==state.session?.user_id)return;
       closeDialogs();notice(action==='start'?'Активность начата. Она появилась в истории.':result.applied===false?'Это выполнение уже учтено.':'Активность завершена. Прогресс сохранён.',true);
-      if(action==='complete'){state.completion=result;await setRoute('completion');}else await renderRoute();
+      if(action==='complete'){const after=await loadCompanion();if(session!==state.session)return;const before=new Set((state.companion?.wardrobe||[]).filter(i=>i.unlocked).map(i=>i.id));result.wardrobe_unlocked=(after?.wardrobe||[]).filter(i=>i.unlocked&&!before.has(i.id));state.completion=result;if(result.applied!==false){const gains=(result.changes||[]).filter(g=>g.after>g.before).map(g=>`${g.name||g.skill_id}: ${g.before} → ${g.after}`);state.chatMessages.push({role:'assistant',source:'local',content:`Шаг завершён. ${gains.join('; ')}.${result.wardrobe_unlocked.length?' Открыто: '+result.wardrobe_unlocked.map(i=>i.name).join(', ')+'. Примерим новый образ?':''}`});state.celebrateNext=gains.length>0;}await setRoute('completion');}else await renderRoute();
     }else if(action==='apply-import'){
       requireRole('hr');if(!state.batch)throw new ApiError('Сначала проверьте выбранные файлы.');const version=state.routeVersion,wasInitial=!state.status.dataset_loaded,batch=state.batch,key=keyFor('import',batch.batch_id);const result=await api('/api/hr/import/apply',{method:'POST',body:{batch_id:batch.batch_id,mode:batch.mode},idempotencyKey:key.value,timeout:20000});key.clear();if(account!==state.session?.user_id)return;state.batch=null;state.status={...state.status,...await api('/api/setup/status')};notice('Импорт завершён.',true);
       if(version!==state.routeVersion)return;
@@ -131,7 +158,7 @@ document.addEventListener('submit',async event=>{
     }else if(form.id==='bootstrap-form'){
       if(!setupToken&&!preview)throw new ApiError('Для первой настройки нужен одноразовый токен из окна запуска приложения.');const password=form.elements.password.value;form.elements.password.value='';await api('/api/setup/bootstrap',{method:'POST',body:{username:fields.get('username'),password,setup_token:setupToken}});setupToken=null;state.status=await api('/api/setup/status');await loadSession();await setRoute('setup');
     }else if(form.id==='goal-form'){
-      requireRole('employee');if(fields.get('goal_index')===null)throw new ApiError('Выберите цель.');const goal=state.profile.goal_options[Number(fields.get('goal_index'))];if(!goal)throw new ApiError('Выберите цель из списка.');await api('/api/me/goal',{method:'PATCH',body:{target_role:goal.target_role,target_grade:goal.target_grade}});closeDialogs();state.completion=null;await renderRoute();notice('Карьерная цель обновлена.',true);if(route()==='home')await recommend();
+      requireRole('employee');if(fields.get('goal_index')===null)throw new ApiError('Выберите цель.');const goal=state.profile.goal_options[Number(fields.get('goal_index'))];if(!goal)throw new ApiError('Выберите цель из списка.');await api('/api/me/goal',{method:'PATCH',body:{target_role:goal.target_role,target_grade:goal.target_grade}});closeDialogs();state.completion=null;state.chatMessages=[];await renderRoute();notice('Карьерная цель обновлена.',true);if(route()==='home')await recommend();
     }else if(form.id==='quest-form'){
       requireGamification();if(!state.gamification.enabled)throw new ApiError('Включите достижения, чтобы выбрать личный квест.');
       const eventId=String(fields.get('event_id')||'').trim();if(!eventId)throw new ApiError('Выберите доступную активность.');

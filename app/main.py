@@ -11,7 +11,7 @@ import uuid
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -23,6 +23,9 @@ from app.db import Database, all_entities, bump_revision, encode, get_entity, ge
 from app.domain import hr_overview, profile_view, recommendation_context, role_key
 from app.imports import MAX_FILE_BYTES, apply_validated, validate_files
 from app.gamification import choose_quest, clear_quest, gamification_view, set_enabled
+from app.companion import companion_view, equip_item
+from app.companion_chat import CompanionCoach, compact_facts
+from app.models import CompanionChat, CompanionEquip
 from app.models import AIResult, ApplyImport, Completion, GamificationSettings, GoalChange, Login, NewUser, PersonalQuest, Setup
 
 
@@ -59,12 +62,16 @@ def create_app(settings=None, recommender=None):
         with db.connection(write=True) as conn:
             # Provider code/configuration may have changed while data stayed the same.
             conn.execute("DELETE FROM recommendation_cache")
-        yield
+        try:
+            yield
+        finally:
+            await application.state.companion_coach.close()
 
     app = FastAPI(title="Career Quest API", version="0.1.0", lifespan=lifespan)
     app.state.db = db
     app.state.settings = settings
     app.state.recommender = recommender
+    app.state.companion_coach = CompanionCoach()
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"] + (["testserver"] if settings.testing else []))
 
     @app.middleware("http")
@@ -230,6 +237,39 @@ def create_app(settings=None, recommender=None):
             employee, data, as_of = load_employee(conn, user["employee_id"])
             clear_quest(conn, employee["employee_id"])
             return gamification_view(conn, employee, data, as_of)
+
+    @app.get("/api/me/companion")
+    def companion(user=Depends(auth.current_user)):
+        auth.require_role(user, "employee")
+        with db.connection() as conn:
+            employee, data, as_of = load_employee(conn, user["employee_id"])
+            return companion_view(conn, employee, data, as_of)
+
+    @app.post("/api/me/companion/equip")
+    def companion_equip(body: CompanionEquip, user=Depends(auth.current_user)):
+        auth.require_role(user, "employee")
+        with db.connection(write=True) as conn:
+            employee, data, as_of = load_employee(conn, user["employee_id"])
+            return equip_item(conn, employee, data, as_of, body.item_id)
+
+    @app.post("/api/me/companion/chat")
+    async def companion_chat(body: CompanionChat, user=Depends(auth.current_user)):
+        auth.require_role(user, "employee")
+        with db.connection() as conn:
+            employee, data, as_of = load_employee(conn, user["employee_id"])
+            context = recommendation_context(employee, data, as_of, revision(conn))
+            context["skill_names"] = {key: value["name"] for key, value in data["skills"].items()}
+            if body.event_id:
+                context["candidates"].sort(key=lambda event: event["event_id"] != body.event_id)
+            facts = compact_facts(context, companion_view(conn, employee, data, as_of))
+
+        async def lines():
+            async for item in app.state.companion_coach.stream(
+                user["employee_id"], facts, body.message.strip(),
+                [turn.model_dump() for turn in body.history], body.event_id, body.skill_id,
+            ):
+                yield json.dumps(item, ensure_ascii=False) + "\n"
+        return StreamingResponse(lines(), media_type="application/x-ndjson", headers={"X-Accel-Buffering": "no"})
 
     @app.post("/api/me/activities/{event_id}/start")
     def start(event_id: str, body: Completion, user=Depends(auth.current_user)):

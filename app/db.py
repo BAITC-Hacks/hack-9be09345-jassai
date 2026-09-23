@@ -54,6 +54,12 @@ CREATE TABLE IF NOT EXISTS gamification_rewards(
     earned_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS gamification_rewards_employee ON gamification_rewards(employee_id,earned_at);
+CREATE TABLE IF NOT EXISTS companion_equipment(
+    employee_id TEXT NOT NULL,
+    slot TEXT NOT NULL CHECK(slot IN ('head','body','accessory','background')),
+    item_id TEXT NOT NULL,
+    PRIMARY KEY(employee_id,slot)
+);
 """
 
 
