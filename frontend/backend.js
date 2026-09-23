@@ -18,7 +18,7 @@ export function normalizeProfile(raw,catalog,rec=null){
 export function normalizeRecommendations(raw,profile,catalog){
   const names=new Map((catalog.skills||[]).map(s=>[s.skill_id,s.name]));
   if(raw.status==='no_candidates')return {status:!profile.trajectory.target.goal?'no_goal':profile.trajectory.coverage_pct===100?'goal_achieved':'no_candidates',source:'none',reasons:Object.keys(raw.reasons||{})};
-  return {status:'ready',source:raw.mode==='ai'?'ai':'fallback',cached:raw.cached,reason:raw.reason,items:(raw.recommendations||[]).map(r=>{const event=r.event;return {...event,event_id:r.event_id,factors:r.factors,alternative:r.alternative,session_date:event.next_session,record_id:event.activity_record_id,can_complete:!event.mandatory&&(event.format==='self_paced'||event.next_session<=profile.as_of_date),gains:(event.expected_gains||[]).map(g=>({...g,name:names.get(g.skill_id)||g.skill_id}))};})};
+  return {status:'ready',source:raw.mode==='ai'?'ai':'fallback',cached:raw.cached,reason:raw.reason,items:(raw.recommendations||[]).map(r=>{const event=r.event;return {...event,event_id:r.event_id,factors:r.factors,reason:r.reason,alternative:r.alternative,session_date:event.next_session,record_id:event.activity_record_id,can_complete:!event.mandatory&&(event.format==='self_paced'||event.next_session<=profile.as_of_date),gains:(event.expected_gains||[]).map(g=>({...g,name:names.get(g.skill_id)||g.skill_id}))};})};
 }
 export function sumCounts(counts={}){return Object.values(counts).reduce((sum,row)=>({added:sum.added+(row.added||0),updated:sum.updated+(row.updated||0),skipped:sum.skipped+(row.skipped||0)}),{added:0,updated:0,skipped:0});}
 export function normalizeOverview(raw){
