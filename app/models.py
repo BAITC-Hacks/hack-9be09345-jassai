@@ -143,6 +143,22 @@ class PersonalQuest(Model):
     event_id: ID
 
 
+class CompanionEquip(Model):
+    item_id: ID
+
+
+class CompanionTurn(Model):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=8000)
+
+
+class CompanionChat(Model):
+    message: str = Field(min_length=1, max_length=2000, pattern=r"\S")
+    history: list[CompanionTurn] = Field(default_factory=list, max_length=6)
+    event_id: ID | None = None
+    skill_id: ID | None = None
+
+
 class Factor(Model):
     type: Literal["goal", "skill_gap", "critical_skill", "history", "format", "duration"]
     text: str = Field(min_length=1, max_length=1500)
