@@ -23,6 +23,10 @@ DEFAULT_MODEL = "gpt-6-luna"
 INSTANCE = "hack-9be09345-jassai"
 KEY_ERROR = "The protected AI key cannot be read for this Windows user. Run launcher.cmd /configure-ai to replace it."
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+AI_ENV_KEYS = (
+    "OPENAI_API_KEY", "NVIDIA_API_KEY", "OPENAI_MODEL", "OPENAI_COMPANION_MODEL",
+    "NVIDIA_COMPANION_MODEL", "CAREERQUEST_COMPANION_PROVIDER", "CAREERQUEST_RECOMMENDER",
+)
 
 
 class LauncherError(RuntimeError):
@@ -46,7 +50,7 @@ def write_json(path, value):
 
 def clean_environment():
     env = dict(os.environ)
-    for key in ("OPENAI_API_KEY", "CAREERQUEST_RECOMMENDER", "CAREERQUEST_BOOTSTRAP_TOKEN"):
+    for key in (*AI_ENV_KEYS, "CAREERQUEST_BOOTSTRAP_TOKEN"):
         env.pop(key, None)
     return env
 
@@ -244,6 +248,14 @@ def check_ui(port):
         with opener.open(f"http://127.0.0.1:{port}{route}", timeout=5) as response:
             if response.status != 200 or not response.read(1):
                 raise LauncherError("The server started but the UI is unavailable.")
+    with opener.open(f"http://127.0.0.1:{port}/static/mascot-assets.json", timeout=5) as response:
+        manifest = json.loads(response.read(16_384))
+    model_url = manifest.get("modelUrl", "").split("?", 1)[0]
+    if model_url != "/static/assets/mascot/character.glb":
+        raise LauncherError("The 3D character is not configured. Extract the complete project ZIP.")
+    with opener.open(f"http://127.0.0.1:{port}{model_url}", timeout=5) as response:
+        if response.read(4) != b"glTF":
+            raise LauncherError("The 3D character is missing or invalid. Extract the complete project ZIP.")
 
 
 @contextmanager
@@ -280,7 +292,8 @@ def sync_environment(project, directory, uv_path):
 
 def serve(project, directory, python, mode, key, model, log):
     env = clean_environment()
-    env.update(CAREERQUEST_DATA_DIR=str(directory), CAREERQUEST_AI_TIMEOUT="9", OPENAI_MODEL=model)
+    env.update(CAREERQUEST_DATA_DIR=str(directory), CAREERQUEST_AI_TIMEOUT="9", OPENAI_MODEL=model,
+               CAREERQUEST_COMPANION_PROVIDER="openai" if key else "none")
     if key:
         env.update(OPENAI_API_KEY=key, CAREERQUEST_RECOMMENDER="app.ai.provider:recommend")
     with socket.socket() as listener:
@@ -347,7 +360,8 @@ def main(argv=None):
     if os.name != "nt":
         print("Use launcher.cmd on Windows 10/11 x64.")
         return 1
-    os.environ.pop("OPENAI_API_KEY", None)
+    for name in AI_ENV_KEYS:
+        os.environ.pop(name, None)
     base = os.environ.get("CAREERQUEST_DATA_DIR")
     if not base:
         local = os.environ.get("LOCALAPPDATA")

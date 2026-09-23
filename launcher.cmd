@@ -28,6 +28,10 @@ exit /b 0
 rem Use built-in commands only: no PS1 execution, policy changes or encoded scripts.
 rem Paths travel through environment variables, not interpolated PowerShell code.
 set "OPENAI_API_KEY="
+set "NVIDIA_API_KEY="
+set "OPENAI_COMPANION_MODEL="
+set "NVIDIA_COMPANION_MODEL="
+set "CAREERQUEST_COMPANION_PROVIDER="
 set "CQ_INSTANCE_ROOT=%CAREERQUEST_DATA_DIR%"
 if not defined CQ_INSTANCE_ROOT if not defined LOCALAPPDATA goto no_data_directory
 if not defined CQ_INSTANCE_ROOT set "CQ_INSTANCE_ROOT=%LOCALAPPDATA%\CareerQuest\instances\hack-9be09345-jassai"

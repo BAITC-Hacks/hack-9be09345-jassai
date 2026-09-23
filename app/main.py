@@ -29,6 +29,9 @@ from app.models import CompanionChat, CompanionEquip
 from app.models import AIResult, ApplyImport, Completion, GamificationSettings, GoalChange, Login, NewUser, PersonalQuest, Setup
 
 
+MASCOT_MODEL_PATH = Path(__file__).resolve().parents[1] / "assets" / "snow_leopard" / "Irbis_SnowLeopard.glb"
+
+
 def error(status, code, message=None):
     raise HTTPException(status, detail={"code": code, **({"message": message} if message else {})})
 
@@ -261,7 +264,7 @@ def create_app(settings=None, recommender=None):
             context["skill_names"] = {key: value["name"] for key, value in data["skills"].items()}
             if body.event_id:
                 context["candidates"].sort(key=lambda event: event["event_id"] != body.event_id)
-            facts = compact_facts(context, companion_view(conn, employee, data, as_of))
+            facts = compact_facts(context, companion_view(conn, employee, data, as_of), event_limit=None)
 
         async def lines():
             async for item in app.state.companion_coach.stream(
@@ -405,6 +408,13 @@ def create_app(settings=None, recommender=None):
                 error(409, "stale_recommendation", "Data changed during AI request; retry")
             conn.execute("INSERT OR REPLACE INTO recommendation_cache VALUES (?,?)", (context_hash, encode(response)))
         return response
+
+    @app.get("/static/assets/mascot/character.glb", include_in_schema=False)
+    def mascot_model():
+        # Serve precisely this public asset, never expose a repository directory.
+        if not MASCOT_MODEL_PATH.is_file():
+            error(404, "mascot_not_available")
+        return FileResponse(MASCOT_MODEL_PATH, media_type="model/gltf-binary")
 
     static_dir = settings.static_dir or Path(__file__).resolve().parents[1] / "frontend"
     if static_dir.is_dir():

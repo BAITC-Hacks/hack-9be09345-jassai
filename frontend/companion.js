@@ -18,7 +18,7 @@ export function wardrobeThumbnail(item,extra=''){
   const color=/^#[\da-f]{3,8}$/i.test(item?.style?.color||'')?item.style.color:'#00805f';
   const shapes={
     head:'<path d="M21 35c-1-17 8-23 19-23s20 6 19 23Z" fill="currentColor"/><path d="M21 34h37c7 0 9 4 7 8H20c-8 0-8-8 1-8Z" fill="currentColor"/><path d="M40 13v21" stroke="white" stroke-opacity=".5" stroke-width="2"/>',
-    body:'<path d="m26 17 14 6 14-6 15 14-12 12-5-5v27H28V38l-5 5-12-12Z" fill="currentColor"/><path d="M31 19c1 10 17 10 18 0M40 28v34" fill="none" stroke="white" stroke-opacity=".55" stroke-width="2"/><circle cx="45" cy="38" r="2" fill="white" fill-opacity=".8"/>',
+    body:'<path d="m29 12 11 8 11-8 13 16 4 25-10 3-7-22 5 36H24l5-36-7 22-10-3 4-25Z" fill="currentColor"/><path d="m32 14 5 13-3 41m14-54-5 13 3 41M25 64h9m12 0h9M13 48l10 3m34 0 10-3" fill="none" stroke="#d9bb6e" stroke-width="3"/><path d="M37 25h6l2 44H35Z" fill="#f1e9ce"/>',
     accessory:'<path d="M26 28v-6c0-14 28-14 28 0v6" fill="none" stroke="currentColor" stroke-width="6"/><rect x="19" y="25" width="42" height="41" rx="12" fill="currentColor"/><rect x="25" y="43" width="30" height="17" rx="6" fill="white" fill-opacity=".25"/><path d="M32 32h16" stroke="white" stroke-opacity=".6" stroke-width="3"/>',
     background:'<rect x="12" y="12" width="56" height="56" rx="9" fill="currentColor"/><path d="M12 53h56M45 12v41" stroke="white" stroke-width="2" stroke-opacity=".45"/><path d="M24 53V28h13v25M22 28h17M52 53V37h10v16" stroke="white" stroke-width="2.5" stroke-opacity=".7" fill="none"/>'
   };
@@ -30,12 +30,12 @@ function stageView(data,{previewItem=null,compact=false}={}){
   const item=selectedItem(data,previewItem),next=data?.next_unlock;
   const welcome=next?`Ближайшее открытие — «${itemName(next)}». Давайте найдём шаг, который развивает нужный вам навык.`:'Я рядом, чтобы связывать ваши шаги с большой целью. Что хотите освоить?';
   return `<section class="companion-room ${compact?'companion-room-compact':''}" aria-label="Мастерская спутника">
-    <div class="companion-room-top"><div class="companion-name"><span class="companion-online" aria-hidden="true"></span><strong>Ваш спутник</strong></div><span class="companion-level">${data?.enabled?`Уровень ${n(data.level||1)}`:'В вашем темпе'}</span></div>
+    <div class="companion-room-top"><div class="companion-name"><span class="companion-online" aria-hidden="true"></span><strong>Ирбис · ваш спутник</strong></div><span class="companion-level">${data?.enabled?`Уровень ${n(data.level||1)}`:'В вашем темпе'}</span></div>
     <div class="mascot-speech" id="mascot-speech" aria-live="polite" aria-atomic="true"><p id="mascot-speech-text">${e(welcome)}</p><small id="mascot-speech-source">Спутник · готов помочь</small></div>
     <div class="companion-stage" data-mascot-stage data-state="idle" ${item?`data-preview-item="${e(item.id)}"`:''} aria-label="3D-спутник в вашей комнате"><div class="mascot-loading" role="status"><span class="mascot-loading-orbit" aria-hidden="true"></span><p>Готовим вашу мастерскую…</p></div></div>
     ${item?`<div class="companion-fitting-note">${icon('eye')} <span>Примерка: <strong>${e(itemName(item))}</strong>${item.unlocked?'':' · ещё не открыто'}</span></div>`:''}
     <div class="companion-room-tools"><button class="companion-room-tool" data-action="companion-tab" data-id="wardrobe">${icon('briefcase')} Переодеть</button><button class="companion-room-tool" data-action="companion-tab" data-id="tree">${icon('skills')} Мои навыки</button></div>
-    <p class="companion-model-note" data-mascot-model-note>Модель спутника появится после подключения</p>
+    <p class="companion-model-note" data-mascot-model-note>Загружаем Ирбиса…</p>
   </section>`;
 }
 
@@ -61,7 +61,7 @@ function nextReward(data){
 
 /** Root may replace this island with its streaming chat view without changing the room. */
 export function companionChatView(){
-  return `<section class="companion-chat" id="companion-chat" aria-label="Разговор со спутником"><div class="companion-section-head"><h2>Давайте разберёмся</h2>${icon('sparkles')}</div><div id="chat-messages" class="companion-chat-messages" role="log" aria-live="polite" aria-label="Сообщения"><p class="companion-chat-welcome">Расскажите своими словами, что хотите уметь или что пока не получается.</p></div><div class="companion-prompts">${ask('Какой навык развивать дальше?',{small:true})}${ask('Что я открою после курса?',{small:true})}</div><form id="companion-chat-form" class="companion-chat-form"><label class="sr-only" for="companion-message">Ваш вопрос спутнику</label><input id="companion-message" name="message" placeholder="Хочу лучше понимать клиента…" maxlength="2000" autocomplete="off" required><button class="companion-send" type="submit" aria-label="Отправить вопрос">${icon('arrow')}</button></form><p id="chat-status" class="companion-chat-status" role="status">Ответ по вашему профилю и каталогу. Голос появится позже.</p></section>`;
+  return `<section class="companion-chat" id="companion-chat" aria-label="Разговор со спутником"><div class="companion-section-head"><h2>Давайте разберёмся</h2>${icon('sparkles')}</div><div id="chat-messages" class="companion-chat-messages" role="log" aria-live="polite" aria-label="Сообщения"><p class="companion-chat-welcome">Расскажите своими словами, что хотите уметь или что пока не получается.</p></div><div class="companion-prompts">${ask('Какой навык развивать дальше?',{small:true})}${ask('Что я открою после курса?',{small:true})}</div><form id="companion-chat-form" class="companion-chat-form"><label class="sr-only" for="companion-message">Ваш вопрос спутнику</label><input id="companion-message" name="message" placeholder="Хочу лучше понимать клиента…" maxlength="2000" autocomplete="off" required><button class="companion-send" type="submit" aria-label="Отправить вопрос">${icon('arrow')}</button></form><p id="chat-status" class="companion-chat-status" role="status">Текстовый разговор по вашему профилю и каталогу. Источник указан у каждого ответа.</p></section>`;
 }
 
 function personalQuest(data,profile){

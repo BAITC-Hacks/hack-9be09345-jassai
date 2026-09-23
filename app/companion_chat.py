@@ -33,7 +33,7 @@ FACTS:
 """
 
 
-def compact_facts(context, companion):
+def compact_facts(context, companion, *, event_limit=30):
     """Intentionally omit employee name, ID, department and coworkers."""
     t = context["trajectory"]
     names = context.get("skill_names", {})
@@ -46,13 +46,15 @@ def compact_facts(context, companion):
             skills.append({"id": branch["skill_id"], "name": branch["name"], "current": branch["current"],
                            "required": branch.get("required"), "critical": branch.get("critical", False)})
     events = []
-    for ev in context.get("candidates", [])[:30]:
+    candidates = context.get("candidates", [])
+    selected = candidates if event_limit is None else candidates[:event_limit]
+    for ev in selected:
         events.append({"id": ev["event_id"], "title": ev["title"], "format": ev["format"],
                        "duration_hours": ev["duration_hours"], "session": ev.get("next_session"),
                        "action": ev.get("action"), "gains": [{**g, "name": names.get(g["skill_id"], g["skill_id"])} for g in ev.get("expected_gains", [])]})
     return {"goal": t["target"].get("goal"), "goal_source": t["target"].get("source"),
             "coverage_pct": t.get("coverage_pct"), "skills": skills, "events": events,
-            "catalog_note": "Это подходящие активности, не рейтинг AI. Показаны первые 30." if len(context.get("candidates", [])) > 30 else "Это подходящие активности, не рейтинг AI.",
+            "catalog_note": f"Это подходящие активности, не рейтинг AI. Показаны первые {event_limit}." if len(selected) < len(candidates) else "Это подходящие активности, не рейтинг AI.",
             "reward_rules": companion.get("rules", []), "enabled": companion.get("enabled", False),
             "next_unlock": companion.get("next_unlock"),
             "wardrobe": [{k: item.get(k) for k in ("id", "name", "slot", "unlocked", "requirement")} for item in companion.get("wardrobe", [])]}
@@ -160,7 +162,12 @@ class CompanionCoach:
     async def remote(self, config, facts, message, history):
         if self.client is None:
             self.client = httpx.AsyncClient(timeout=httpx.Timeout(7.5, connect=2.0), transport=self.transport)
-        instructions = SYSTEM + json.dumps(facts, ensure_ascii=False, separators=(",", ":"))
+        # Local answers inspect every eligible candidate. Only the outbound
+        # model context is bounded, so a short course after item 30 is not lost.
+        outbound = {**facts, "events": facts["events"][:30]}
+        if len(facts["events"]) > 30:
+            outbound["catalog_note"] = "Это подходящие активности, не рейтинг AI. Показаны первые 30."
+        instructions = SYSTEM + json.dumps(outbound, ensure_ascii=False, separators=(",", ":"))
         turns = [{"role": t["role"], "content": t["content"]} for t in history[-6:]] + [{"role": "user", "content": message}]
         if config["provider"] == "openai":
             body = {"model": config["model"], "instructions": instructions, "input": turns,
@@ -171,6 +178,7 @@ class CompanionCoach:
             body = {"model": config["model"], "messages": [{"role": "system", "content": instructions}, *turns],
                     "max_tokens": 400, "temperature": 0.2, "stream": True}
         headers = {"Authorization": "Bearer " + config["key"], "Accept": "text/event-stream"}
+        nvidia_finished = False
         async with self.client.stream("POST", config["url"], json=body, headers=headers) as response:
             response.raise_for_status()
             async for line in response.aiter_lines():
@@ -178,7 +186,9 @@ class CompanionCoach:
                     continue
                 payload = line[5:].strip()
                 if payload == "[DONE]":
-                    return
+                    if config["provider"] == "nvidia" and nvidia_finished:
+                        return
+                    raise ValueError("provider_response_incomplete")
                 data = json.loads(payload)
                 if config["provider"] == "openai":
                     if data.get("type") in {"error", "response.failed", "response.incomplete"}:
@@ -191,6 +201,11 @@ class CompanionCoach:
                         raise ValueError("provider_error")
                     choice = next(iter(data.get("choices", [])), {})
                     text = choice.get("delta", {}).get("content") or ""
+                    finish = choice.get("finish_reason")
+                    if finish is not None:
+                        if finish != "stop":
+                            raise ValueError("provider_response_incomplete")
+                        nvidia_finished = True
                 if text:
                     yield text
             raise ValueError("provider_stream_interrupted")

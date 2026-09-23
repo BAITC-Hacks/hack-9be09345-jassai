@@ -296,6 +296,64 @@ def test_incomplete_eof_is_not_a_successful_cached_answer(facts, monkeypatch, pr
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("finish_reason", ["length", "content_filter", "tool_calls", None])
+def test_nvidia_done_requires_successful_finish_reason(facts, monkeypatch, finish_reason):
+    use_provider(monkeypatch, "nvidia")
+    payload = sse(
+        {"choices": [{"delta": {"content": "Только начало ответа"}}]},
+        {"choices": [{"delta": {}, "finish_reason": finish_reason}]},
+        "[DONE]",
+    )
+    async def run():
+        coach = chat.CompanionCoach(httpx.MockTransport(lambda _: httpx.Response(200, text=payload)))
+        try:
+            result = await collect(coach, facts)
+            assert result[-1]["type"] == "error" and result[-1]["partial"] is True
+            assert not coach.cache and not coach.active
+        finally:
+            await coach.close()
+    asyncio.run(run())
+
+
+def test_openai_done_marker_without_completed_response_is_not_cached(facts, monkeypatch):
+    use_provider(monkeypatch)
+    payload = sse({"type": "response.output_text.delta", "delta": "Только начало"}, "[DONE]")
+    async def run():
+        coach = chat.CompanionCoach(httpx.MockTransport(lambda _: httpx.Response(200, text=payload)))
+        try:
+            result = await collect(coach, facts)
+            assert result[-1]["type"] == "error" and result[-1]["partial"] is True
+            assert not coach.cache and not coach.active
+        finally:
+            await coach.close()
+    asyncio.run(run())
+
+
+def test_full_local_candidate_context_is_bounded_before_outbound_request(real_context, monkeypatch):
+    use_provider(monkeypatch)
+    context, companion = real_context
+    template = context["candidates"][0]
+    context["candidates"] = [{**template, "event_id": f"EV_{index:02}"} for index in range(35)]
+    facts = chat.compact_facts(context, companion, event_limit=None)
+    assert len(facts["events"]) == 35
+    requests = []
+    def handler(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, text=successful_response("openai"))
+    async def run():
+        coach = chat.CompanionCoach(httpx.MockTransport(handler))
+        try:
+            result = await collect(coach, facts)
+            assert result[-1]["type"] == "done"
+        finally:
+            await coach.close()
+    asyncio.run(run())
+    outbound = json.loads(requests[0]["instructions"].split("FACTS:\n", 1)[1])
+    assert len(outbound["events"]) == 30 and "Показаны первые 30" in outbound["catalog_note"]
+    assert len(facts["events"]) == 35, "Outbound bounding must not mutate local facts"
+    assert "PRIVATE_EMPLOYEE_NAME" not in requests[0]["instructions"]
+
+
 def test_network_timeout_redacts_details_and_releases_owner(facts, monkeypatch):
     use_provider(monkeypatch)
     def handler(request):
@@ -540,3 +598,26 @@ def test_one_hour_phrase_is_a_real_duration_limit(facts):
     facts["events"][0]["duration_hours"] = 1
     answer = chat.local_answer(facts, "Что можно пройти за час?")
     assert answer["event_ids"] == [facts["events"][0]["id"]]
+
+
+def test_time_budget_searches_eligible_courses_beyond_first_thirty(stack, monkeypatch):
+    app, _, client, data, _ = stack
+    with app.state.db.connection(write=True) as conn:
+        for event in data["events"]:
+            put_entity(conn, "events", event["event_id"], {**event, "duration_hours": 4})
+        for index in range(35):
+            event = {**deepcopy(data["events"][0]), "event_id": f"EV_EXTRA_{index:02}", "duration_hours": 4}
+            put_entity(conn, "events", event["event_id"], event)
+        short = {**deepcopy(data["events"][0]), "event_id": "ZZ_ONE_HOUR", "title": "Короткая практика", "duration_hours": 1}
+        put_entity(conn, "events", short["event_id"], short)
+    available = client.get("/api/me").json()["available_steps"]
+    assert len(available) > 30 and available[-1]["event_id"] == "ZZ_ONE_HOUR"
+    use_provider(monkeypatch)
+    def forbidden(_):
+        raise AssertionError("A deterministic time-budget question must stay local")
+    app.state.companion_coach = chat.CompanionCoach(httpx.MockTransport(forbidden))
+    response = client.post("/api/me/companion/chat", json={"message": "Мало времени, могу 1 час"})
+    assert response.status_code == 200
+    events = [json.loads(line) for line in response.text.splitlines()]
+    assert events[-1]["source"] == "local" and events[-1]["event_ids"] == ["ZZ_ONE_HOUR"]
+    assert "Короткая практика" in events[0]["text"]

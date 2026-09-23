@@ -1,9 +1,11 @@
 """Wardrobe rewards remain private and factual; the tree cannot bypass eligibility."""
 from copy import deepcopy
+import importlib
 import sqlite3
 
 from fastapi import HTTPException
 import pytest
+from fastapi.testclient import TestClient
 
 from app.companion import DEFAULT_EQUIPMENT, companion_view, equip_item, skill_tree
 from app.db import Database, SCHEMA
@@ -13,6 +15,31 @@ from tests.conftest import sample_dataset
 
 
 AS_OF = "2026-10-01"
+
+
+def test_public_mascot_asset_is_glb_and_does_not_expose_repository(stack):
+    with TestClient(stack[0]) as anonymous:
+        response = anonymous.get("/static/assets/mascot/character.glb")
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "model/gltf-binary"
+        assert response.content[:4] == b"glTF"
+        assert int.from_bytes(response.content[4:8], "little") == 2
+        assert int.from_bytes(response.content[8:12], "little") == len(response.content)
+        for path in (
+            "/static/assets/mascot/../app/config.py",
+            "/static/assets/mascot/%2e%2e/%2e%2e/%2e%2e/app/config.py",
+            "/static/assets/mascot/source/build_character.py",
+            "/static/assets/mascot/character.blend",
+        ):
+            assert anonymous.get(path).status_code == 404
+
+
+def test_missing_mascot_asset_returns_safe_404(stack, tmp_path, monkeypatch):
+    app_main = importlib.import_module("app.main")
+    monkeypatch.setattr(app_main, "MASCOT_MODEL_PATH", tmp_path / "missing.glb")
+    response = stack[2].get("/static/assets/mascot/character.glb")
+    assert response.status_code == 404 and response.json()["detail"]["code"] == "mascot_not_available"
+    assert str(tmp_path) not in response.text
 
 
 @pytest.fixture

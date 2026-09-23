@@ -32,7 +32,7 @@ export function mountCompanionChat({getCsrf,profile,messages=[],onState=()=>{},o
     const history=messages.filter(m=>!m.incomplete&&m.content).slice(-6).map(({role,content})=>({role,content}));
     messages.push({role:'user',content:message});const reply={role:'assistant',content:'',source:'local',incomplete:true};messages.push(reply);while(messages.length>24)messages.shift();render();input.value='';
     const controller=new AbortController();active=controller;send.disabled=true;stop.hidden=false;status.textContent='Спутник читает ваш вопрос…';onState('thinking');bubble('Сейчас разберёмся…','Спутник · читает вопрос');
-    const start=performance.now();let first=null,terminal=false;
+    const start=performance.now();let first=null,terminal=false;delete status.dataset.firstTextMs;
     const timeout=setTimeout(()=>controller.abort('timeout'),10000);
     const receive=event=>{
       if(disposed||active!==controller)return;
@@ -41,8 +41,8 @@ export function mountCompanionChat({getCsrf,profile,messages=[],onState=()=>{},o
       terminal=true;
       if(event.type==='error'){reply.incomplete=true;status.textContent=event.message;const text=reply.content||event.message;bubble(text,'Ответ не завершён');if(!reply.content)reply.content=event.message;render();return;}
       reply.incomplete=false;reply.source=event.source;reply.event_ids=event.event_ids||[];
-      const timing=first===null?'':` · первый текст ${Math.round(first)} мс`;
-      status.textContent=sourceName(event.source)+(event.cached?' · из кэша':'')+timing+(event.source==='local'?' · без вызова AI':event.source==='preview'?'':' · ответ AI, проверяйте прогноз в карточке');
+      if(first!==null)status.dataset.firstTextMs=String(Math.round(first));
+      status.textContent=sourceName(event.source)+(event.source==='local'?' · без вызова AI':event.source==='preview'?'':' · проверяйте прогноз в карточке активности');
       bubble(reply.content,sourceName(event.source));render();
     };
     try{

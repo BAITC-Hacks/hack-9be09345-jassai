@@ -4,7 +4,6 @@ import * as THREE from './vendor/three.module.js';
 const DEFAULT_EQUIPMENT={head:'cap_starter',body:'body_starter',accessory:'accessory_none',background:'room_starter'};
 const ITEM_SLOTS={cap_starter:'head',cap_spark:'head',cap_quest:'head',body_starter:'body',body_explorer:'body',accessory_none:'accessory',accessory_notebook:'accessory',accessory_compass:'accessory',room_starter:'background',room_horizon:'background'};
 const STATES=new Set(['idle','listening','thinking','speaking','celebrate']);
-const MATERIALS={skin:'#f1d7aa',green:'#087b5a',greenDark:'#285449',cream:'#f7f3df',ink:'#273d31',yellow:'#edba43',blue:'#5a72b5',notebook:'#688bc7',gold:'#c19645',terra:'#be7254'};
 const MODEL_PATH='/static/assets/mascot/character.glb';
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 function material(color,extra={}){return new THREE.MeshStandardMaterial({color,roughness:.72,metalness:0,...extra});}
@@ -12,60 +11,97 @@ function mesh(geometry,mat,x=0,y=0,z=0){const item=new THREE.Mesh(geometry,mat);
 function sphere(parent,mat,radius,x,y,z,scale=null){const item=mesh(new THREE.SphereGeometry(radius,28,20),mat,x,y,z);if(scale)item.scale.set(...scale);parent.add(item);return item;}
 function box(parent,mat,size,x,y,z){const item=mesh(new THREE.BoxGeometry(...size),mat,x,y,z);parent.add(item);return item;}
 function cylinder(parent,mat,top,bottom,height,x,y,z){const item=mesh(new THREE.CylinderGeometry(top,bottom,height,40),mat,x,y,z);parent.add(item);return item;}
-function capsule(parent,mat,radius,length,x,y,z){const item=mesh(new THREE.CapsuleGeometry(radius,length,8,20),mat,x,y,z);parent.add(item);return item;}
 function line(parent,points,color,radius=.009){const curve=new THREE.CatmullRomCurve3(points.map(point=>new THREE.Vector3(...point)));const item=mesh(new THREE.TubeGeometry(curve,20,radius,8,false),material(color));parent.add(item);return item;}
 
-function buildDisplayStand(){
-  const group=new THREE.Group(),headSlot=new THREE.Group(),bodySlot=new THREE.Group(),accessorySlot=new THREE.Group(),stand=new THREE.Group();
-  headSlot.position.y=1.22;group.add(headSlot,bodySlot,accessorySlot,stand);
-  group.userData={headSlot,bodySlot,accessorySlot,stand,shirt:material(MATERIALS.green)};
-  return group;
+function disposeObject(object){
+  const geometries=new Set(),materials=new Set(),textures=new Set();
+  object.traverse(child=>{if(child.geometry)geometries.add(child.geometry);for(const mat of Array.isArray(child.material)?child.material:child.material?[child.material]:[])materials.add(mat);});
+  for(const mat of materials){for(const value of Object.values(mat))if(value?.isTexture)textures.add(value);mat.dispose();}
+  for(const texture of textures){texture.dispose();texture.source?.data?.close?.();}
+  for(const geometry of geometries)geometry.dispose();
+}
+/** The shipped GLB has two real clips; other states reuse them without lip-sync claims. */
+export function mapMascotAnimations(clips=[]){
+  const named=Object.fromEntries(clips.map(clip=>[clip.name.toLowerCase(),clip]));
+  const breathe=named.idle_breathe||named.idle||clips[0]||null;
+  const look=named.idle_lookaround||breathe;
+  return {idle:breathe,idleAlternate:look,listening:named.listening||look,
+    thinking:named.thinking||look,speaking:named.speaking||breathe,celebrate:named.celebrate||look};
 }
 
-function disposeObject(object){object.traverse(child=>{child.geometry?.dispose();if(child.material){for(const mat of Array.isArray(child.material)?child.material:[child.material]){for(const value of Object.values(mat))if(value?.isTexture)value.dispose();mat.dispose();}}});}
-function clearGroup(group){for(const child of [...group.children]){group.remove(child);disposeObject(child);}}
-function dressDisplay(character,equipment,previewItem){
-  const {headSlot,bodySlot,accessorySlot,shirt,stand}=character.userData;
-  clearGroup(headSlot);clearGroup(bodySlot);clearGroup(accessorySlot);clearGroup(stand);
-  const previewId=typeof previewItem==='string'?previewItem:previewItem?.id,slot=ITEM_SLOTS[previewId];
-  if(!previewId||slot==='background'||previewId==='cap_starter'||previewId==='accessory_none')return;
-  equipment={...DEFAULT_EQUIPMENT,[slot]:previewId};
-  cylinder(stand,material('#b8c5a6'),.035,.05,1.25,0,.67,0);
-  cylinder(stand,material('#c5d0b3'),.40,.46,.085,0,.10,0);
-  shirt.color.set(equipment.body==='body_explorer'?MATERIALS.blue:MATERIALS.green);
-  if(slot==='body'){
-    const torso=capsule(bodySlot,shirt.clone(),.43,.58,0,1.28,0);torso.scale.set(1.12,1,.45);
-    const left=capsule(bodySlot,shirt.clone(),.17,.22,-.47,1.56,0),right=capsule(bodySlot,shirt.clone(),.17,.22,.47,1.56,0);left.rotation.z=-.65;right.rotation.z=.65;
-    line(bodySlot,[[-.40,1.75,0],[0,1.94,0],[.40,1.75,0]],'#9f895d',.024);
-    line(bodySlot,[[0,1.94,0],[0,2.07,0],[.09,2.1,0],[.11,2.02,0]],'#9f895d',.019);
+/** Keep the torso on the podium: an asymmetric tail must not move the body axis. */
+export function normalizeMascot(model){
+  model.updateMatrixWorld(true);
+  const bounds=new THREE.Box3().setFromObject(model),size=bounds.getSize(new THREE.Vector3());
+  const anchor=model.getObjectByName('pelvis')||model.getObjectByName('root');
+  const center=anchor?anchor.getWorldPosition(new THREE.Vector3()):bounds.getCenter(new THREE.Vector3());
+  const scale=2.79/(size.y||2.79);
+  model.scale.multiplyScalar(scale);
+  model.position.set(-center.x*scale,.05-bounds.min.y*scale,-center.z*scale);
+  model.updateMatrixWorld(true);
+  return {scale,height:2.79,bodyCenter:center.toArray()};
+}
+
+/** Costume geometry is authored in the GLB rest space, then attached to real bones. */
+export function attachIrbisWardrobe(model){
+  const bone=name=>model.getObjectByName(name)||model.getObjectByName(THREE.PropertyBinding.sanitizeNodeName(name));
+  const head=bone('head'),chest=bone('chest');
+  const hand=bone('hand.R')||bone('hand.L');
+  if(!head||!chest||!hand)return null;
+  const groups={},coats=[];
+  model.traverse(node=>{for(const mat of Array.isArray(node.material)?node.material:node.material?[node.material]:[]){
+    if(mat.name==='CQ_SnowLeopard_coat'&&!coats.some(entry=>entry.material===mat))coats.push({material:mat,color:mat.color.clone()});
+  }});
+  function attach(id,bone,build){
+    const group=new THREE.Group();group.name='wardrobe_'+id;build(group);model.add(group);
+    model.updateMatrixWorld(true);bone.attach(group);groups[id]=group;group.visible=false;
   }
-  if(equipment.head==='cap_spark'){
-    const cap=material(MATERIALS.yellow);
-    const crown=mesh(new THREE.SphereGeometry(.54,32,16,0,Math.PI*2,0,Math.PI*.49),cap,0,.24,0);crown.scale.set(1.04,1,.96);headSlot.add(crown);
-    const brim=sphere(headSlot,cap,.36,0,.29,.39,[1.12,.10,.80]);brim.rotation.x=.08;
-    line(headSlot,[[0,.80,0],[0,.72,.31],[0,.35,.52]],'#b78d29',.009);
-  }else if(equipment.head==='cap_quest'){
-    const beanie=material(MATERIALS.terra),band=material('#a85d42');
-    const crown=mesh(new THREE.SphereGeometry(.55,32,18,0,Math.PI*2,0,Math.PI*.56),beanie,0,.28,0);crown.scale.set(1.035,1.05,.98);headSlot.add(crown);
-    const rim=mesh(new THREE.TorusGeometry(.505,.065,10,40),band,0,.25,0);rim.rotation.x=Math.PI/2;headSlot.add(rim);sphere(headSlot,beanie,.10,0,.87,0);
+  attach('cap_spark',head,group=>{
+    const cap=material('#e3b345');
+    const crown=mesh(new THREE.SphereGeometry(.40,32,20,0,Math.PI*2,0,Math.PI/2),cap,0,3.73,.015);
+    crown.scale.set(1,.65,.92);group.add(crown);
+    const brim=sphere(group,cap,.30,0,3.745,.34,[1.30,.085,.86]);brim.rotation.x=.045;
+    line(group,[[0,3.995,.015],[0,3.95,.20],[0,3.75,.38]],'#b5852d',.008);
+    sphere(group,material('#c29436'),.032,0,3.995,.015,[1,.55,1]);
+  });
+  attach('cap_quest',head,group=>{
+    const wool=material('#be7254'),band=material('#9b553e');
+    const crown=mesh(new THREE.SphereGeometry(.40,32,20,0,Math.PI*2,0,Math.PI*.54),wool,0,3.76,.005);
+    crown.scale.set(1,.87,.89);group.add(crown);
+    const rim=mesh(new THREE.TorusGeometry(.379,.047,10,48),band,0,3.745,.005);
+    rim.rotation.x=Math.PI/2;rim.scale.y=.89;group.add(rim);
+    sphere(group,wool,.079,0,4.145,.005);
+    for(let index=0;index<16;index++){
+      const angle=index/16*Math.PI*2;
+      line(group,[[Math.cos(angle)*.385,3.72,.005+Math.sin(angle)*.345],
+        [Math.cos(angle)*.385,3.78,.005+Math.sin(angle)*.345]],'#c38468',.005);
+    }
+  });
+  attach('accessory_notebook',hand,group=>{
+    const book=new THREE.Group();book.position.set(-.79,1.51,.32);book.rotation.z=-.10;book.rotation.y=-.14;group.add(book);
+    const cover=material('#557bb6'),paper=material('#f4ecd7');
+    box(book,cover,[.31,.42,.077],0,0,0);box(book,paper,[.267,.375,.079],.012,0,0);
+    box(book,cover,[.31,.42,.012],0,0,.047);
+    line(book,[[-.095,.11,.055],[.096,.11,.055]],'#e0dbb8',.007);
+    line(book,[[-.095,.057,.055],[.055,.057,.055]],'#c9d9ef',.006);
+    for(let y=-.13;y<.17;y+=.08)line(book,[[-.155,y,.012],[-.17,y,.052],[-.12,y,.056]],'#d5ba76',.006);
+  });
+  attach('accessory_compass',chest,group=>{
+    line(group,[[-.17,2.82,.23],[-.20,2.63,.37],[0,2.31,.385],[.20,2.63,.37],[.17,2.82,.23]],'#b8954d',.009);
+    const outer=mesh(new THREE.CylinderGeometry(.115,.115,.027,40),material('#c7a157',{metalness:.5,roughness:.4}),0,2.32,.395);
+    outer.rotation.x=Math.PI/2;group.add(outer);
+    const face=mesh(new THREE.CylinderGeometry(.093,.093,.031,40),material('#f2e8c7'),0,2.32,.40);
+    face.rotation.x=Math.PI/2;group.add(face);
+    const needle=mesh(new THREE.ConeGeometry(.021,.115,3),material('#a54938'),0,2.325,.425);
+    needle.rotation.z=-.30;group.add(needle);
+  });
+  const base=new THREE.Color('#0a4133'),blue=new THREE.Color('#365b98');
+  const ratio=new THREE.Color(blue.r/base.r,blue.g/base.g,blue.b/base.b);
+  function apply(equipment){
+    for(const [id,group] of Object.entries(groups))group.visible=equipment[ITEM_SLOTS[id]]===id;
+    for(const entry of coats){entry.material.color.copy(entry.color);if(equipment.body==='body_explorer')entry.material.color.multiply(ratio);}
   }
-  if(slot==='body'&&equipment.body==='body_explorer'){
-    const hoodie=material(MATERIALS.blue),string=material('#e2e5f1');
-    const hood=mesh(new THREE.TorusGeometry(.31,.115,14,28,Math.PI*1.15),hoodie,0,1.78,-.055);hood.rotation.z=-Math.PI*.075;hood.rotation.x=.6;bodySlot.add(hood);
-    line(bodySlot,[[-.10,1.71,.335],[-.10,1.54,.37]],'#dbe2f5',.012);line(bodySlot,[[.10,1.71,.335],[.10,1.54,.37]],'#dbe2f5',.012);
-    const pocket=box(bodySlot,material('#4c64a0'),[.36,.16,.025],0,1.10,.366);pocket.rotation.x=-.05;
-    sphere(bodySlot,string,.018,-.10,1.53,.37);sphere(bodySlot,string,.018,.10,1.53,.37);
-  }
-  if(equipment.accessory==='accessory_notebook'){
-    const book=new THREE.Group();book.position.set(0,1.44,.03);book.scale.setScalar(1.8);book.rotation.y=.17;accessorySlot.add(book);
-    box(book,material(MATERIALS.notebook),[.36,.48,.10],0,0,0);box(book,material('#f3efd9'),[.30,.43,.104],.02,0,0);box(book,material(MATERIALS.notebook),[.36,.48,.017],0,0,.063);
-    line(book,[[-.09,.13,.075],[.10,.13,.075]],'#cfddf1',.009);line(book,[[-.09,.065,.075],[.065,.065,.075]],'#cfddf1',.009);
-  }else if(equipment.accessory==='accessory_compass'){
-    line(accessorySlot,[[-.16,1.75,.29],[-.19,1.39,.38],[0,1.12,.41],[.19,1.39,.38],[.16,1.75,.29]],'#b59149',.012);
-    const outer=mesh(new THREE.CylinderGeometry(.145,.145,.045,32),material(MATERIALS.gold,{metalness:.4,roughness:.4}),0,1.16,.43);outer.rotation.x=Math.PI/2;accessorySlot.add(outer);
-    const face=mesh(new THREE.CylinderGeometry(.119,.119,.048,32),material('#f7edcf'),0,1.16,.435);face.rotation.x=Math.PI/2;accessorySlot.add(face);
-    const needle=mesh(new THREE.ConeGeometry(.025,.14,3),material('#a44d3c'),0,1.185,.469);needle.rotation.z=-.30;accessorySlot.add(needle);
-  }
+  return {apply,groups,coats};
 }
 
 function buildRoom(){
@@ -98,64 +134,184 @@ function updateRoom(room,equipment,scene){
  * update accepts the same partial options. dispose is required before route replacement.
  */
 export function mountMascot(host,options={}){
-  if(!host)return {update(){},setState(){},dispose(){}};
+  const inert=status=>({update(){},setState(){},getState(){return {status,modelLoaded:false};},dispose(){}});
+  if(!host)return inert('unmounted');
   let renderer;
-  try{renderer=new THREE.WebGLRenderer({antialias:true,alpha:false,powerPreference:'low-power'});}catch(_){
-    host.innerHTML='<div class="mascot-model-error"><strong>Мастерская в 3D недоступна</strong><p>Браузер не смог запустить WebGL. Древо навыков, гардероб и разговор со спутником продолжают работать.</p></div>';
-    return {update(){},setState(){},dispose(){}};
+  try{renderer=new THREE.WebGLRenderer({antialias:true,alpha:false,powerPreference:'high-performance'});}
+  catch{
+    host.dataset.modelState='unsupported';host.setAttribute('aria-busy','false');
+    host.innerHTML='<div class="mascot-model-error" role="status"><strong>3D недоступно на этом устройстве</strong><p>Браузер не смог запустить WebGL. Древо навыков, гардероб и разговор со спутником продолжают работать.</p></div>';
+    return inert('unsupported');
   }
-  let disposed=false,raf=0,visible=true,state='idle',stateStart=0,lastFrame=0,previewItem=options.previewItem||null,equipped={...DEFAULT_EQUIPMENT,...options.equipped},yaw=.06,targetYaw=.06,pointerX=0,pointerY=0;
-  const reduced=matchMedia('(prefers-reduced-motion: reduce)'),scene=new THREE.Scene();scene.background=new THREE.Color('#eaf1dd');
-  const camera=new THREE.PerspectiveCamera(32,1,.1,100);camera.position.set(3.6,2.7,6.8);camera.lookAt(0,1.13,0);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,1.6));renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.1;
-  const canvas=renderer.domElement;canvas.tabIndex=0;canvas.setAttribute('role','img');canvas.setAttribute('aria-label','3D-комната и примерочная. Стрелки влево и вправо поворачивают образ; Home возвращает исходный вид.');host.replaceChildren(canvas);
-  const ambient=new THREE.HemisphereLight('#ffffe8','#aeb995',2.3);scene.add(ambient);
-  const key=new THREE.DirectionalLight('#fff5d7',3.3);key.position.set(-3.5,6,5);key.castShadow=true;key.shadow.mapSize.set(512,512);key.shadow.camera.left=-4;key.shadow.camera.right=4;key.shadow.camera.top=5;key.shadow.camera.bottom=-4;key.shadow.normalBias=.035;key.shadow.bias=-.0006;key.shadow.radius=4;scene.add(key);
-  const fill=new THREE.DirectionalLight('#d6eae7',.9);fill.position.set(4,2,1);scene.add(fill);
-  const room=buildRoom(),modelRoot=new THREE.Group(),placeholder=buildDisplayStand();scene.add(room,modelRoot);modelRoot.add(placeholder);modelRoot.rotation.y=yaw;
-  let model=placeholder,mixer=null,animations={},activeClip=null,externalSlots=null,loadVersion=0,celebrationDots=null,celebrationTimer=0;
-  function visualEquipment(){const result={...equipped};const id=typeof previewItem==='string'?previewItem:previewItem?.id,slot=typeof previewItem==='object'?previewItem?.slot:ITEM_SLOTS[id];if(id&&slot&&ITEM_SLOTS[id])result[slot]=id;return result;}
+  let disposed=false,raf=0,visible=true,state='idle',stateStart=0,lastFrame=0;
+  let previewItem=options.previewItem||null,equipped={...DEFAULT_EQUIPMENT,...options.equipped};
+  let yaw=0,targetYaw=0,loadVersion=0,currentUrl=null,modelStatus='loading';
+  let model=null,mixer=null,animations={},activeClip=null,wardrobeAdapter=null,externalSlots={};
+  let idleElapsed=0,celebrationDots=null,celebrationTimer=0,userPaused=false,idleMode='auto';
+  const reduced=matchMedia('(prefers-reduced-motion: reduce)'),scene=new THREE.Scene();
+  const camera=new THREE.PerspectiveCamera(32,1,.1,100);
+  const room=buildRoom(),modelRoot=new THREE.Group();scene.add(room,modelRoot);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,1.5));
+  renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+  renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.04;
+  const canvas=renderer.domElement;canvas.tabIndex=0;canvas.setAttribute('role','img');
+  canvas.setAttribute('aria-label','Ирбис — снежный барс в чапане. Стрелки влево и вправо поворачивают персонажа; Home возвращает исходный вид.');
+  const loading=document.createElement('div');loading.className='mascot-model-status';loading.setAttribute('role','status');
+  const loadingText=document.createElement('p');loading.append(loadingText);
+  const retry=document.createElement('button');retry.type='button';retry.className='button secondary small';retry.textContent='Повторить загрузку';retry.hidden=true;loading.append(retry);
+  const controls=document.createElement('div');controls.className='mascot-motion-controls';controls.setAttribute('aria-label','Движения Ирбиса');
+  const pause=document.createElement('button');pause.type='button';pause.textContent='Пауза';pause.setAttribute('aria-label','Пауза анимации');pause.setAttribute('aria-pressed','false');
+  const movement=document.createElement('button');movement.type='button';movement.textContent='Оглянуться';movement.setAttribute('aria-label','Показать движение: Ирбис оглядывается');controls.append(pause,movement);
+  host.replaceChildren(canvas,loading,controls);
+  const ambient=new THREE.HemisphereLight('#ffffed','#8da290',1.9);scene.add(ambient);
+  const key=new THREE.DirectionalLight('#fff5e6',2.7);key.position.set(-3.5,6,5);key.castShadow=true;
+  key.shadow.mapSize.set(512,512);key.shadow.camera.left=-4;key.shadow.camera.right=4;key.shadow.camera.top=5;key.shadow.camera.bottom=-4;
+  key.shadow.normalBias=.025;key.shadow.bias=-.0006;key.shadow.radius=4;scene.add(key);
+  const fill=new THREE.DirectionalLight('#e1efff',1.0);fill.position.set(4,2,1);scene.add(fill);
+  function status(next,text=''){
+    modelStatus=next;host.dataset.modelState=next;host.setAttribute('aria-busy',String(next==='loading'));
+    loading.hidden=next==='ready';loadingText.textContent=text;retry.hidden=next!=='error';
+    controls.hidden=next!=='ready';
+    const note=host.closest('.companion-room')?.querySelector('[data-mascot-model-note]');
+    if(note)note.textContent=next==='ready'?'Ирбис · перетащите мышью или используйте ← → для поворота':next==='loading'?'Загружаем 3D-модель Ирбиса…':'Древо навыков, гардероб и чат доступны без 3D';
+    options.onStatus?.(next);
+  }
+  function visualEquipment(){
+    const result={...equipped},id=typeof previewItem==='string'?previewItem:previewItem?.id;
+    if(ITEM_SLOTS[id])result[ITEM_SLOTS[id]]=id;
+    return result;
+  }
   function applyEquipment(){
-    const outfit=visualEquipment();dressDisplay(placeholder,outfit,previewItem);updateRoom(room,outfit,scene);
-    if(externalSlots){for(const [name,node] of Object.entries(externalSlots)){if(name.startsWith('item_'))node.visible=Object.values(outfit).includes(name.slice(5));}}
-    const note=host.closest('.companion-room')?.querySelector('[data-mascot-model-note]');if(note)note.textContent=model===placeholder?'Модель спутника появится после подключения':'3D-маскот команды · используйте стрелки для поворота';
+    const outfit=visualEquipment();updateRoom(room,outfit,scene);wardrobeAdapter?.apply(outfit);
+    for(const [name,node] of Object.entries(externalSlots))node.visible=Object.values(outfit).includes(name.slice(5));
+    host.dataset.previewItem=typeof previewItem==='string'?previewItem:previewItem?.id||'';
   }
   function render(){if(!disposed)renderer.render(scene,camera);}
-  function resize(){if(disposed)return;const width=Math.max(1,host.clientWidth),height=Math.max(1,host.clientHeight);renderer.setSize(width,height,false);camera.aspect=width/height;camera.position.z=camera.aspect<.8?7.8:6.8;camera.updateProjectionMatrix();render();}
-  const resizeObserver=new ResizeObserver(resize);resizeObserver.observe(host);
-  const observer=new IntersectionObserver(entries=>{visible=entries[0]?.isIntersecting!==false;if(visible){lastFrame=0;start();}},{threshold:0});observer.observe(host);
-  function setState(next){clearTimeout(celebrationTimer);state=STATES.has(next)?next:'idle';stateStart=performance.now();host.dataset.state=state;
-    const clip=animations[state]||animations.idle;if(mixer&&clip&&clip!==activeClip){if(activeClip)mixer.clipAction(activeClip).fadeOut(.18);mixer.clipAction(clip).reset().fadeIn(.18).play();activeClip=clip;}
-    if(state==='celebrate'){makeCelebration();celebrationTimer=setTimeout(()=>{if(!disposed&&state==='celebrate')setState('idle');},2200);}else removeCelebration();render();start();
+  function resize(){
+    if(disposed)return;const width=Math.max(1,host.clientWidth),height=Math.max(1,host.clientHeight);
+    renderer.setSize(width,height,false);camera.aspect=width/height;
+    const halfFov=Math.tan(THREE.MathUtils.degToRad(camera.fov)/2);
+    const distance=Math.max(3.37/(2*halfFov),2.85/(2*halfFov*camera.aspect));
+    camera.position.set(distance*.10,1.48+distance*.065,distance);camera.lookAt(.10,1.48,0);
+    camera.updateProjectionMatrix();render();
+  }
+  function playClip(clip){
+    if(!mixer||!clip||clip===activeClip)return;
+    if(activeClip)mixer.clipAction(activeClip).fadeOut(.35);
+    mixer.clipAction(clip).reset().fadeIn(.35).play();activeClip=clip;
+    host.dataset.animation=clip.name;
+  }
+  function updateMotionControls(){
+    const paused=userPaused||reduced.matches;host.dataset.motionPaused=String(paused);
+    pause.setAttribute('aria-pressed',String(paused));pause.disabled=reduced.matches;
+    pause.textContent=reduced.matches?'Без анимации':userPaused?'Продолжить':'Пауза';
+    pause.setAttribute('aria-label',reduced.matches?'Анимации отключены в настройках устройства':userPaused?'Продолжить анимацию':'Пауза анимации');
+    movement.disabled=paused;movement.textContent=idleMode==='lookaround'?'Спокойно':'Оглянуться';
+    movement.setAttribute('aria-label',idleMode==='lookaround'?'Показать спокойное дыхание':'Показать движение: Ирбис оглядывается');
+  }
+  function setMotion(mode){
+    idleMode=['breathe','lookaround'].includes(mode)?mode:'auto';idleElapsed=0;
+    if(state==='idle')playClip(idleMode==='lookaround'?animations.idleAlternate:animations.idle);
+    updateMotionControls();render();start();
+  }
+  function setState(next){
+    if(disposed)return;clearTimeout(celebrationTimer);state=STATES.has(next)?next:'idle';stateStart=performance.now();idleElapsed=0;host.dataset.state=state;
+    playClip(state==='idle'&&idleMode==='lookaround'?animations.idleAlternate:animations[state]||animations.idle);
+    if(state==='celebrate'){makeCelebration();celebrationTimer=setTimeout(()=>{if(!disposed&&state==='celebrate')setState('idle');},2200);}
+    else removeCelebration();
+    render();start();
   }
   function removeCelebration(){if(celebrationDots){scene.remove(celebrationDots);disposeObject(celebrationDots);celebrationDots=null;}}
-  function makeCelebration(){removeCelebration();if(reduced.matches)return;celebrationDots=new THREE.Group();for(let i=0;i<16;i++){const dot=mesh(new THREE.BoxGeometry(.035,.075,.018),material(['#e6b34b','#087b5a','#6a8db4'][i%3]),0,2,0);dot.userData={angle:i/16*Math.PI*2,speed:.6+(i%4)*.15,lift:2.5+(i%5)*.14};celebrationDots.add(dot);}scene.add(celebrationDots);}
-  function tick(now){raf=0;if(disposed||!visible||document.hidden)return;if(now-lastFrame<32){raf=requestAnimationFrame(tick);return;}const delta=lastFrame?Math.min((now-lastFrame)/1000,.05):0,last=now/1000;lastFrame=now;
-    if(mixer)mixer.update(delta);
-    yaw+=(targetYaw-yaw)*.13;modelRoot.rotation.y=yaw;
-    if(celebrationDots){const elapsed=(now-stateStart)/1000;celebrationDots.children.forEach((dot,i)=>{const {angle,speed,lift}=dot.userData;dot.position.set(Math.cos(angle)*speed*elapsed,lift+elapsed*.6-elapsed*elapsed*.65,Math.sin(angle)*speed*elapsed);dot.rotation.set(elapsed*3+i,elapsed*2,elapsed*4);});}
-    render();if((!reduced.matches&&((mixer&&activeClip)||celebrationDots))||Math.abs(targetYaw-yaw)>.002)raf=requestAnimationFrame(tick);
+  function makeCelebration(){
+    removeCelebration();if(reduced.matches||userPaused)return;celebrationDots=new THREE.Group();
+    for(let index=0;index<16;index++){
+      const dot=mesh(new THREE.BoxGeometry(.035,.075,.018),material(['#e6b34b','#087b5a','#6a8db4'][index%3]),0,2,0);
+      dot.userData={angle:index/16*Math.PI*2,speed:.6+(index%4)*.15,lift:2.5+(index%5)*.14};celebrationDots.add(dot);
+    }
+    scene.add(celebrationDots);
+  }
+  function tick(now){
+    raf=0;if(disposed||!visible||document.hidden)return;
+    if(now-lastFrame<32){raf=requestAnimationFrame(tick);return;}
+    const delta=lastFrame?Math.min((now-lastFrame)/1000,.075):0;lastFrame=now;
+    if(mixer&&!reduced.matches&&!userPaused){
+      mixer.update(delta);
+      if(state==='idle'){
+        idleElapsed+=delta;
+        const clip=idleMode==='lookaround'?animations.idleAlternate:idleMode==='breathe'?animations.idle:idleElapsed%21<13?animations.idle:animations.idleAlternate;
+        playClip(clip);
+      }
+    }
+    yaw=reduced.matches?targetYaw:yaw+(targetYaw-yaw)*.15;modelRoot.rotation.y=yaw;
+    if(celebrationDots){
+      const elapsed=(now-stateStart)/1000;
+      celebrationDots.children.forEach((dot,index)=>{const {angle,speed,lift}=dot.userData;dot.position.set(Math.cos(angle)*speed*elapsed,lift+elapsed*.6-elapsed*elapsed*.65,Math.sin(angle)*speed*elapsed);dot.rotation.set(elapsed*3+index,elapsed*2,elapsed*4);});
+    }
+    render();
+    if((!reduced.matches&&!userPaused&&((mixer&&activeClip)||celebrationDots))||Math.abs(targetYaw-yaw)>.002)raf=requestAnimationFrame(tick);
   }
   function start(){if(!disposed&&!raf&&visible&&!document.hidden)raf=requestAnimationFrame(tick);}
-  function pointerMove(event){const rect=canvas.getBoundingClientRect();pointerX=clamp((event.clientX-rect.left)/rect.width*2-1,-1,1);pointerY=clamp((event.clientY-rect.top)/rect.height*2-1,-1,1);if(event.buttons===1&&event.pointerType==='mouse')targetYaw=clamp(targetYaw+(event.movementX||0)*.012,-1.4,1.4);start();}
-  function pointerLeave(){pointerX=0;pointerY=0;start();}
-  function keyDown(event){if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();targetYaw=clamp(targetYaw+(event.key==='ArrowLeft'?-.22:.22),-1.4,1.4);start();}if(event.key==='Home'){event.preventDefault();targetYaw=.06;start();}}
-  function visibility(){if(!document.hidden){lastFrame=0;start();}else if(raf){cancelAnimationFrame(raf);raf=0;}}
-  function motionChange(){render();start();}
-  canvas.addEventListener('pointermove',pointerMove);canvas.addEventListener('pointerleave',pointerLeave);canvas.addEventListener('keydown',keyDown);document.addEventListener('visibilitychange',visibility);reduced.addEventListener('change',motionChange);
-  async function loadModel(url){
-    if(!url)return;let resolved;try{resolved=new URL(url,window.location.href);if(resolved.origin!==location.origin||!resolved.pathname.endsWith('.glb'))return;}catch{return;}
-    const version=++loadVersion;
-    try{const {GLTFLoader}=await import('./vendor/GLTFLoader.js');const gltf=await new GLTFLoader().loadAsync(resolved.href);if(disposed||version!==loadVersion){disposeObject(gltf.scene);return;}
-      if(model!==placeholder){modelRoot.remove(model);disposeObject(model);}
-      modelRoot.remove(placeholder);model=gltf.scene;
-      const bounds=new THREE.Box3().setFromObject(model),size=bounds.getSize(new THREE.Vector3()),center=bounds.getCenter(new THREE.Vector3()),scale=2.79/(size.y||2.79);model.scale.multiplyScalar(scale);model.position.set(-center.x*scale,-bounds.min.y*scale,-center.z*scale);model.traverse(node=>{if(node.isMesh){node.castShadow=true;node.receiveShadow=true;}});modelRoot.add(model);
-      externalSlots={};model.traverse(node=>{if(node.name.startsWith('item_'))externalSlots[node.name]=node;});animations=Object.fromEntries(gltf.animations.map(clip=>[clip.name.toLowerCase(),clip]));mixer=new THREE.AnimationMixer(model);applyEquipment();setState(state);render();
-    }catch(_){if(disposed||version!==loadVersion)return;const note=host.closest('.companion-room')?.querySelector('[data-mascot-model-note]');if(note)note.textContent='Модель команды пока недоступна · комната и гардероб работают';}
+  function pointerMove(event){if(event.buttons===1&&event.pointerType==='mouse'){targetYaw=clamp(targetYaw+(event.movementX||0)*.012,-Math.PI,Math.PI);start();}}
+  function keyDown(event){
+    if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();targetYaw=clamp(targetYaw+(event.key==='ArrowLeft'?-.22:.22),-Math.PI,Math.PI);start();}
+    if(event.key==='Home'){event.preventDefault();targetYaw=0;start();}
   }
-  function update(next={}){if(disposed)return;if(next.equipped)equipped={...DEFAULT_EQUIPMENT,...next.equipped};if(Object.hasOwn(next,'previewItem'))previewItem=next.previewItem;applyEquipment();if(next.state)setState(next.state);if(next.modelUrl)loadModel(next.modelUrl);render();start();}
-  applyEquipment();resize();setState(options.state||'idle');if(options.modelUrl)loadModel(options.modelUrl);
-  return {update,setState,dispose(){if(disposed)return;disposed=true;loadVersion++;clearTimeout(celebrationTimer);cancelAnimationFrame(raf);resizeObserver.disconnect();observer.disconnect();canvas.removeEventListener('pointermove',pointerMove);canvas.removeEventListener('pointerleave',pointerLeave);canvas.removeEventListener('keydown',keyDown);document.removeEventListener('visibilitychange',visibility);reduced.removeEventListener('change',motionChange);mixer?.stopAllAction();disposeObject(scene);if(model!==placeholder)disposeObject(placeholder);placeholder.userData.shirt.dispose();renderer.dispose();renderer.forceContextLoss();canvas.remove();}};
+  function visibility(){if(!document.hidden){lastFrame=0;start();}else if(raf){cancelAnimationFrame(raf);raf=0;}}
+  function motionChange(){
+    if(reduced.matches){removeCelebration();if(mixer){mixer.stopAllAction();activeClip=null;playClip(animations.idle);mixer.setTime(0);}yaw=targetYaw;}
+    updateMotionControls();lastFrame=0;render();start();
+  }
+  const togglePause=()=>{userPaused=!userPaused;if(userPaused)removeCelebration();updateMotionControls();lastFrame=0;render();start();};
+  const changeMovement=()=>setMotion(idleMode==='lookaround'?'breathe':'lookaround');
+  pause.addEventListener('click',togglePause);movement.addEventListener('click',changeMovement);
+  const resizeObserver=new ResizeObserver(resize);resizeObserver.observe(host);
+  const observer=new IntersectionObserver(entries=>{visible=entries[0]?.isIntersecting!==false;if(visible){lastFrame=0;start();}else if(raf){cancelAnimationFrame(raf);raf=0;}},{threshold:0});observer.observe(host);
+  canvas.addEventListener('pointermove',pointerMove);canvas.addEventListener('keydown',keyDown);
+  document.addEventListener('visibilitychange',visibility);reduced.addEventListener('change',motionChange);
+  async function loadModel(url){
+    if(disposed)return;let resolved;
+    try{resolved=new URL(url,location.href);if(resolved.origin!==location.origin||!resolved.pathname.endsWith('.glb'))throw new Error('Invalid model URL');}
+    catch{status('error','Не удалось открыть файл модели. Остальные разделы работают.');return;}
+    currentUrl=url;const version=++loadVersion;status('loading','Загружаем Ирбиса…');
+    try{
+      const {GLTFLoader}=await import('./vendor/GLTFLoader.js');
+      const gltf=await new GLTFLoader().loadAsync(resolved.href,event=>{
+        if(disposed||version!==loadVersion)return;
+        const percent=event.total>0?Math.min(99,Math.round(event.loaded/event.total*100)):null;
+        loadingText.textContent=percent===null?'Загружаем Ирбиса…':`Загружаем Ирбиса… ${percent}%`;
+      });
+      if(disposed||version!==loadVersion){disposeObject(gltf.scene);return;}
+      mixer?.stopAllAction();if(model){modelRoot.remove(model);disposeObject(model);}
+      model=gltf.scene;normalizeMascot(model);
+      model.traverse(node=>{if(node.isMesh){node.castShadow=true;node.receiveShadow=true;node.frustumCulled=false;}});
+      modelRoot.add(model);wardrobeAdapter=attachIrbisWardrobe(model);
+      externalSlots={};model.traverse(node=>{if(node.name.startsWith('item_'))externalSlots[node.name]=node;});
+      animations=mapMascotAnimations(gltf.animations);activeClip=null;mixer=new THREE.AnimationMixer(model);
+      applyEquipment();setState(state);if(reduced.matches)mixer.setTime(0);
+      status('ready');resize();start();
+    }catch{
+      if(disposed||version!==loadVersion)return;
+      status('error','Ирбис не загрузился. Повторите попытку — навыки, награды и чат работают.');
+    }
+  }
+  const retryLoad=()=>{if(currentUrl)loadModel(currentUrl);};retry.addEventListener('click',retryLoad);
+  function update(next={}){
+    if(disposed)return;
+    if(next.equipped)equipped={...DEFAULT_EQUIPMENT,...next.equipped};
+    if(Object.hasOwn(next,'previewItem'))previewItem=next.previewItem;
+    applyEquipment();status(modelStatus,loadingText.textContent);if(next.state)setState(next.state);
+    if(next.modelUrl&&next.modelUrl!==currentUrl)loadModel(next.modelUrl);render();start();
+  }
+  applyEquipment();updateMotionControls();resize();setState(options.state||'idle');
+  if(options.modelUrl)loadModel(options.modelUrl);else status('error','Файл модели пока не подключён. Остальные разделы работают.');
+  return {update,setState,setMotion,getState(){return {status:modelStatus,modelLoaded:!!model,animation:activeClip?.name||null,paused:userPaused||reduced.matches,idleMode,equipped:{...equipped},previewItem};},dispose(){
+    if(disposed)return;disposed=true;host.dataset.modelState='disposed';loadVersion++;
+    clearTimeout(celebrationTimer);cancelAnimationFrame(raf);resizeObserver.disconnect();observer.disconnect();
+    canvas.removeEventListener('pointermove',pointerMove);canvas.removeEventListener('keydown',keyDown);retry.removeEventListener('click',retryLoad);
+    pause.removeEventListener('click',togglePause);movement.removeEventListener('click',changeMovement);
+    document.removeEventListener('visibilitychange',visibility);reduced.removeEventListener('change',motionChange);
+    mixer?.stopAllAction();disposeObject(scene);renderer.dispose();renderer.forceContextLoss();canvas.remove();loading.remove();controls.remove();
+  }};
 }
 
 export const mascotAssetContract={defaultModelUrl:MODEL_PATH,states:[...STATES],equipmentSlots:Object.keys(DEFAULT_EQUIPMENT),itemIds:Object.keys(ITEM_SLOTS)};

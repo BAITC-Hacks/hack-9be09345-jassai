@@ -19,10 +19,18 @@ async function mountCompanion(){
   const version=++mountVersion,host=main.querySelector('[data-mascot-stage]');
   chat=mountCompanionChat({getCsrf:()=>state.csrf,profile:state.profile,messages:state.chatMessages,onState:value=>mascot?.setState(value),onUnauthorized:()=>{resetPrivateState();renderRoute();},previewAnswer:preview?((message,context)=>previewChat(message,context)):null});
   if(!host)return;
+  if(mascot){mascot.update({equipped:state.companion.equipped,previewItem:state.previewItem,state:state.celebrateNext?'celebrate':'idle'});state.celebrateNext=false;return;}
   try{const [{mountMascot},manifest]=await Promise.all([import('./mascot-renderer.js'),mascotManifest??=(fetch('/static/mascot-assets.json',{cache:'no-cache'}).then(r=>r.ok?r.json():{}).catch(()=>({})))]);if(version!==mountVersion||!host.isConnected)return;mascot=mountMascot(host,{equipped:state.companion.equipped,wardrobe:state.companion.wardrobe,previewItem:state.previewItem,state:state.celebrateNext?'celebrate':'idle',modelUrl:manifest.modelUrl||null});state.celebrateNext=false;}
   catch{if(host.isConnected)host.innerHTML='<div class="mascot-loading"><p>3D пока недоступно на этом устройстве. Древо, гардероб и подсказки работают.</p></div>';}
 }
-function renderCompanion(){disposeCompanion();main.innerHTML=companionView(state.companion,state.profile,{tab:state.companionTab,selectedSkill:state.selectedSkill,previewItem:state.previewItem});mountCompanion();}
+function renderCompanion(){
+  const template=document.createElement('template');template.innerHTML=companionView(state.companion,state.profile,{tab:state.companionTab,selectedSkill:state.selectedSkill,previewItem:state.previewItem});
+  const previousStage=main.querySelector('[data-mascot-stage]'),nextStage=template.content.querySelector('[data-mascot-stage]');
+  // Fitting a hat must not download/reparse the character or recreate its WebGL context.
+  if(mascot&&previousStage&&nextStage){mountVersion++;chat?.dispose();chat=null;nextStage.replaceWith(previousStage);}
+  else disposeCompanion();
+  main.replaceChildren(template.content);mountCompanion();
+}
 function previewChat(message,{event_id,skill_id}={}){
   const branches=state.companion?.tree.branches||[],q=message.toLowerCase();
   const branch=branches.find(b=>b.skill_id===skill_id)||branches.find(b=>b.current<b.required),activity=state.profile.available_steps.find(a=>a.event_id===event_id)||branch?.activities[0];
@@ -57,7 +65,7 @@ function navigation(){
   document.body.classList.toggle('setup-mode',state.status.setup_required===true);
   document.body.classList.toggle('has-preview',!!preview);
   const links=!user?[]:hr?[['hr','home','Обзор команды'],['employees','users','Сотрудники'],['import','upload','Импорт данных'],['settings','settings','Настройки AI']]:[['home','home','Мой путь'],['companion','sparkles','Спутник'],['skills','skills','Навыки'],['catalog','book','Активности'],['history','history','История']];
-  document.querySelector('#navigation').innerHTML=links.map(([id,symbol,text])=>`<a href="#${id}" class="${active===id?'active':''}" ${active===id?'aria-current="page"':''}>${icon(symbol)}<span>${text}</span></a>`).join('');
+  document.querySelector('#navigation').innerHTML=links.map(([id,symbol,text])=>`<a href="#${id}" aria-label="${e(text)}" title="${e(text)}" class="${active===id?'active':''}" ${active===id?'aria-current="page"':''}>${icon(symbol)}<span>${text}</span></a>`).join('');
   const fullName=!hr&&state.profile?.employee?.full_name||user?.display_name||user?.username||'',initials=fullName.split(/\s+/).slice(0,2).map(x=>x[0]||'').join('').toUpperCase(),position=hr?'HR · Развитие команды':state.profile?.employee?`${state.profile.employee.role} · ${state.profile.employee.grade}`:'Личное пространство';
   document.querySelector('#identity').innerHTML=user?`<div class="identity"><span class="avatar">${e(initials)}</span><div><strong>${e(fullName)}</strong><small>${e(position)}</small></div></div>`:'';
   document.querySelector('#logout').hidden=!user;

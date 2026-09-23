@@ -131,6 +131,9 @@ def test_sync_uses_locked_external_environment_and_removes_inherited_secrets(tmp
     python.parent.mkdir(parents=True)
     python.touch()
     monkeypatch.setenv("OPENAI_API_KEY", DUMMY)
+    monkeypatch.setenv("NVIDIA_API_KEY", "dummy-inherited-nvidia-key")
+    monkeypatch.setenv("CAREERQUEST_COMPANION_PROVIDER", "nvidia")
+    monkeypatch.setenv("OPENAI_COMPANION_MODEL", "inherited-companion-model")
     monkeypatch.setenv("CAREERQUEST_RECOMMENDER", "untrusted:callable")
     monkeypatch.setenv("CAREERQUEST_BOOTSTRAP_TOKEN", "inherited-token")
     calls = []
@@ -143,7 +146,7 @@ def test_sync_uses_locked_external_environment_and_removes_inherited_secrets(tmp
     assert env["UV_PROJECT_ENVIRONMENT"] == str(tmp_path / "venv")
     assert env["UV_PYTHON_INSTALL_DIR"] == str(tmp_path / "python")
     assert env["UV_CACHE_DIR"] == str(tmp_path / "uv-cache")
-    assert not {"OPENAI_API_KEY", "CAREERQUEST_RECOMMENDER", "CAREERQUEST_BOOTSTRAP_TOKEN"} & env.keys()
+    assert not {*launcher.AI_ENV_KEYS, "CAREERQUEST_BOOTSTRAP_TOKEN"} & env.keys()
 
 
 def test_sync_network_failure_has_actionable_safe_message(tmp_path, monkeypatch):
