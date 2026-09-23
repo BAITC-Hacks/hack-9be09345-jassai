@@ -36,6 +36,24 @@ CREATE TABLE IF NOT EXISTS idempotency(
 CREATE TABLE IF NOT EXISTS recommendation_cache(
     context_hash TEXT PRIMARY KEY, response TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS gamification_preferences(
+    employee_id TEXT PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 0 CHECK(enabled IN (0,1)),
+    quest_event_id TEXT,
+    quest_state TEXT CHECK(quest_state IN ('active','completed')),
+    quest_completed_at TEXT
+);
+CREATE TABLE IF NOT EXISTS gamification_rewards(
+    record_id TEXT PRIMARY KEY,
+    employee_id TEXT NOT NULL,
+    event_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    xp INTEGER NOT NULL CHECK(xp>0),
+    gained_levels INTEGER NOT NULL CHECK(gained_levels>0),
+    quest_completed INTEGER NOT NULL DEFAULT 0 CHECK(quest_completed IN (0,1)),
+    earned_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS gamification_rewards_employee ON gamification_rewards(employee_id,earned_at);
 """
 
 

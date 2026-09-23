@@ -22,7 +22,8 @@ from app.config import Settings
 from app.db import Database, all_entities, bump_revision, encode, get_entity, get_meta, put_entity, revision, snapshot
 from app.domain import hr_overview, profile_view, recommendation_context, role_key
 from app.imports import MAX_FILE_BYTES, apply_validated, validate_files
-from app.models import AIResult, ApplyImport, Completion, GoalChange, Login, NewUser, Setup
+from app.gamification import choose_quest, clear_quest, gamification_view, set_enabled
+from app.models import AIResult, ApplyImport, Completion, GamificationSettings, GoalChange, Login, NewUser, PersonalQuest, Setup
 
 
 def error(status, code, message=None):
@@ -198,6 +199,37 @@ def create_app(settings=None, recommender=None):
                 put_entity(conn, "employees", employee["employee_id"], employee)
                 bump_revision(conn)
             return profile_view(employee, data, as_of)
+
+    @app.get("/api/me/gamification")
+    def gamification(user=Depends(auth.current_user)):
+        auth.require_role(user, "employee")
+        with db.connection() as conn:
+            employee, data, as_of = load_employee(conn, user["employee_id"])
+            return gamification_view(conn, employee, data, as_of)
+
+    @app.patch("/api/me/gamification")
+    def gamification_settings(body: GamificationSettings, user=Depends(auth.current_user)):
+        auth.require_role(user, "employee")
+        with db.connection(write=True) as conn:
+            employee, data, as_of = load_employee(conn, user["employee_id"])
+            set_enabled(conn, employee["employee_id"], body.enabled)
+            return gamification_view(conn, employee, data, as_of)
+
+    @app.post("/api/me/gamification/quest")
+    def select_personal_quest(body: PersonalQuest, user=Depends(auth.current_user)):
+        auth.require_role(user, "employee")
+        with db.connection(write=True) as conn:
+            employee, data, as_of = load_employee(conn, user["employee_id"])
+            choose_quest(conn, employee, data, as_of, body.event_id)
+            return gamification_view(conn, employee, data, as_of)
+
+    @app.delete("/api/me/gamification/quest")
+    def cancel_personal_quest(user=Depends(auth.current_user)):
+        auth.require_role(user, "employee")
+        with db.connection(write=True) as conn:
+            employee, data, as_of = load_employee(conn, user["employee_id"])
+            clear_quest(conn, employee["employee_id"])
+            return gamification_view(conn, employee, data, as_of)
 
     @app.post("/api/me/activities/{event_id}/start")
     def start(event_id: str, body: Completion, user=Depends(auth.current_user)):

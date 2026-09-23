@@ -7,6 +7,7 @@ from fastapi import HTTPException
 
 from app.db import bump_revision, encode, get_meta, put_entity, snapshot
 from app.domain import REPEATABLE_EVENTS, effective_skills, eligibility, employee_history, profile_view
+from app.gamification import award_completion, gamification_view
 
 
 def fail(code, message, status=409):
@@ -109,11 +110,15 @@ def complete_activity(conn, username, employee_id, event_id, body, idempotency_k
     put_entity(conn, "history", record["record_id"], record)
     data["history"][record["record_id"]] = record
     after = effective_skills(employee, data, as_of)
+    changes = [{"skill_id": sid, "before": before.get(sid, 0), "after": value} for sid, value in after.items() if value != before.get(sid, 0)]
+    reward = award_completion(conn, employee, event, record, changes)
     bump_revision(conn)
     result = {
         "record": record,
-        "changes": [{"skill_id": sid, "before": before.get(sid, 0), "after": value} for sid, value in after.items() if value != before.get(sid, 0)],
+        "changes": changes,
         "profile": profile_view(employee, data, as_of),
+        "reward": reward,
+        "gamification": gamification_view(conn, employee, data, as_of),
     }
     conn.execute("INSERT INTO idempotency VALUES (?,?,?,?)", (username, idempotency_key, signature, encode(result)))
     return result

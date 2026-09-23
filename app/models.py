@@ -135,6 +135,14 @@ class ApplyImport(Model):
     batch_id: str
 
 
+class GamificationSettings(Model):
+    enabled: bool = Field(strict=True)
+
+
+class PersonalQuest(Model):
+    event_id: ID
+
+
 class Factor(Model):
     type: Literal["goal", "skill_gap", "critical_skill", "history", "format", "duration"]
     text: str = Field(min_length=1, max_length=1500)

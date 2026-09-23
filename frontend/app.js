@@ -2,11 +2,12 @@ import {createApi,ApiError} from './api.js';
 import {escapeHtml as e,date} from './ui.js';
 import * as view from './views.js';
 import {createBackendAdapter} from './backend.js';
+import {gamificationView} from './gamification.js';
 
 const main=document.querySelector('#main');
 const params=new URLSearchParams(location.search);
 const preview=params.get('preview');
-const state={session:null,status:{},profile:null,completion:null,batch:null,routeVersion:0,importVersion:0,csrf:null,settings:null};
+const state={session:null,status:{},profile:null,gamification:null,completion:null,batch:null,routeVersion:0,importVersion:0,csrf:null,settings:null};
 // The launcher opens /#setup_token=...; consume the token without retaining it in the URL.
 let setupToken=new URLSearchParams(location.hash.slice(1)).get('setup_token');
 if(setupToken) history.replaceState(null,'',location.pathname+location.search+'#setup');
@@ -18,10 +19,10 @@ let noticeTimer;
 function notice(text){const target=document.querySelector('#notice');target.textContent=text;target.hidden=false;clearTimeout(noticeTimer);noticeTimer=setTimeout(()=>target.hidden=true,7000);}
 function formError(form,error){form.querySelector('.form-error').innerHTML=view.errorView(error);}
 function keyFor(action,id){const key=`cq:pending:${state.session?.user_id}:${action}:${id}`;let value=sessionStorage.getItem(key);if(!value){value=crypto.randomUUID();sessionStorage.setItem(key,value);}return {value,clear:()=>sessionStorage.removeItem(key)};}
-function resetPrivateState(){state.session=null;state.csrf=null;state.profile=null;state.settings=null;state.completion=null;state.batch=null;document.querySelector('#goal-dialog').close();document.querySelector('#goal-dialog').innerHTML='';}
+function resetPrivateState(){state.session=null;state.csrf=null;state.profile=null;state.gamification=null;state.settings=null;state.completion=null;state.batch=null;history.replaceState(null,'',location.pathname+location.search+'#home');document.querySelector('#goal-dialog').close();document.querySelector('#goal-dialog').innerHTML='';}
 function navigation(){
   const hr=state.session?.role==='hr';
-  const links=state.session?(hr?[['hr','◎','Обзор команды'],['employees','♧','Профили и доступ'],['import','⇧','Импорт данных'],['settings','⚙','Настройки AI']]:[['home','▦','Мой путь'],['skills','◇','Мои навыки'],['catalog','↗','Доступные шаги'],['history','◷','История']]):[];
+  const links=state.session?(hr?[['hr','◎','Обзор команды'],['employees','♧','Профили и доступ'],['import','⇧','Импорт данных'],['settings','⚙','Настройки AI']]:[['home','▦','Мой путь'],['skills','◇','Мои навыки'],['catalog','↗','Доступные шаги'],['history','◷','История'],...(!preview?[['achievements','✦','Достижения']]:[])]):[];
   const route=location.hash.slice(1)||'home';
   document.querySelector('#navigation').innerHTML=links.map(([id,icon,text])=>`<a href="#${id}" class="${route===id||(route==='home'&&id==='hr')?'active':''}" ${route===id?'aria-current="page"':''}><span class="nav-icon" aria-hidden="true">${icon}</span>${text}</a>`).join('');
   const user=state.session;
@@ -47,7 +48,7 @@ async function renderRoute(){
     else if(raw==='import'){if(!hr)throw new ApiError('Импорт доступен HR.',403);html=view.importView(!state.status.dataset_loaded);}
     else if((raw==='home'&&hr)||raw==='hr'){if(!hr)throw new ApiError('Обзор команды доступен HR.',403);if(!state.status.dataset_loaded){html=view.setupView(state.status);}else{const data=await api('/api/hr/overview');state.status.as_of_date=data.as_of_date||state.status.as_of_date;navigation();html=view.hrView(data);}}
     else if(raw.startsWith('employee/')){if(!hr)throw new ApiError('Просмотр других сотрудников доступен HR.',403);const id=decodeURIComponent(raw.slice(9));const profile=await api('/api/hr/employees/'+encodeURIComponent(id));if(version!==state.routeVersion)return;state.profile=profile;html=view.employeeView(profile,{readOnly:true});}
-    else if(['home','skills','history','catalog'].includes(raw)){const profile=await api('/api/me');if(version!==state.routeVersion)return;state.profile=profile;state.status.as_of_date=profile.as_of_date||state.status.as_of_date;navigation();html=raw==='catalog'?view.availableView(profile):view.employeeView(profile,{section:raw,completion:state.completion});}
+    else if(['home','skills','history','catalog','achievements'].includes(raw)){if(hr)throw new ApiError('Личные достижения и действия доступны сотруднику.',403);const [profile,gamification]=await Promise.all([api('/api/me'),preview?null:api('/api/me/gamification')]);if(version!==state.routeVersion)return;state.profile=profile;state.gamification=gamification;state.status.as_of_date=profile.as_of_date||state.status.as_of_date;navigation();html=raw==='achievements'?gamificationView(gamification,profile):raw==='catalog'?view.availableView(profile):view.employeeView(profile,{section:raw,completion:state.completion,gamification});}
     else {html=view.empty('Такой страницы нет','Вернитесь в своё рабочее пространство.','<a class="button" href="#home">На главную</a>');}
     if(version===state.routeVersion){main.innerHTML=html;if(raw==='settings'&&(state.settings?.not_connected||preview)){if(state.settings?.not_connected)main.insertAdjacentHTML('afterbegin','<div class="info">Настройки AI пока недоступны на сервере. Подключение должен завершить администратор приложения.</div>');for(const field of main.querySelectorAll('.provider-form input,.provider-form button,#ai-policy-form button'))field.disabled=true;}}
   }catch(error){if(version!==state.routeVersion)return;if(error.status===401){resetPrivateState();navigation();main.innerHTML=view.loginView();notice('Сессия завершена. Войдите снова.');}else{main.innerHTML=view.errorView(error)+view.button('Повторить','reload');}}
@@ -59,7 +60,7 @@ async function recommend(){
   if(target.getAttribute('aria-busy')==='true')return;
   target.setAttribute('aria-busy','true');
   target.innerHTML='<div class="loading" role="status">Подбираем шаги с учётом цели и истории. До 10 секунд…</div>';
-  try{const result=await api('/api/me/recommendations',{method:'POST',body:{refresh:true},timeout:11000});if(version!==state.routeVersion)return;state.profile.recommendations=result;main.innerHTML=view.employeeView(state.profile,{completion:state.completion});}
+  try{const result=await api('/api/me/recommendations',{method:'POST',body:{refresh:true},timeout:11000});if(version!==state.routeVersion)return;state.profile.recommendations=result;main.innerHTML=view.employeeView(state.profile,{completion:state.completion,gamification:state.gamification});}
   catch(error){if(version===state.routeVersion)target.innerHTML=view.errorView(error)+view.button('Повторить подбор','recommend');}
   finally{target.removeAttribute('aria-busy');}
 }
@@ -75,6 +76,15 @@ document.addEventListener('click',async event=>{
     if(action==='reconnect')await boot();
     if(action==='reload')await renderRoute();
     if(action==='recommend')await recommend();
+    if(action==='gamification-toggle'){
+      const enabled=control.dataset.enabled==='true';
+      await api('/api/me/gamification',{method:'PATCH',body:{enabled}});
+      await renderRoute();notice(enabled?'Достижения включены. Новые завершения принесут личный опыт.':'Достижения приостановлены. Награды сохранены.');
+    }
+    if(action==='quest-clear'){
+      await api('/api/me/gamification/quest',{method:'DELETE'});
+      await renderRoute();notice('Квест снят. Вы можете выбрать другой шаг.');
+    }
     if(action==='start'||action==='complete'){
       const id=control.dataset.id,key=keyFor(action,id);
       const result=await api(action==='start'?'/api/me/activities':`/api/me/activities/${encodeURIComponent(id)}/complete`,{method:'POST',idempotencyKey:key.value,body:action==='start'?{event_id:id,session_date:control.dataset.session||null}:{}});
@@ -106,7 +116,7 @@ document.addEventListener('submit',async event=>{
     if(form.id==='login-form'){
       const password=form.elements.password.value;form.elements.password.value='';
       await api('/api/auth/login',{method:'POST',body:{username:fields.get('username'),password}});
-      await loadSession();state.completion=null;await renderRoute();
+      await loadSession();state.completion=null;state.gamification=null;history.replaceState(null,'',location.pathname+location.search+'#home');await renderRoute();
     }
     if(form.id==='bootstrap-form'){
       if(!setupToken&&!preview)throw new ApiError('Откройте приложение через launcher: нужен одноразовый токен настройки.');
@@ -121,6 +131,10 @@ document.addEventListener('submit',async event=>{
       document.querySelector('#goal-dialog').close();state.completion=null;
       await renderRoute();notice('Цель обновлена. Рекомендации будут подобраны заново.');
       if(!location.hash||location.hash==='#home')await recommend();
+    }
+    if(form.id==='quest-form'){
+      await api('/api/me/gamification/quest',{method:'POST',body:{event_id:fields.get('event_id')}});
+      await renderRoute();notice('Личный квест выбран. Начать активность можно в доступных шагах.');
     }
     if(form.id==='employee-search'){location.hash='employee/'+encodeURIComponent(fields.get('employee_id').trim());}
     if(form.id==='create-user-form'){

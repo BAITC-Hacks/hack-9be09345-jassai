@@ -1,6 +1,6 @@
 # Контракт интеграции A → B и C
 
-Версия 1.0. Сервер: `app.main:app`. OpenAPI: `/openapi.json`, интерактивная проверка: `/docs`.
+Версия 1.1. Сервер: `app.main:app`. OpenAPI: `/openapi.json`, интерактивная проверка: `/docs`.
 
 ## Границы ответственности
 
@@ -45,9 +45,22 @@ HR создаёт аккаунт сотрудника: `POST /api/hr/users` JSON
 - `GET /api/catalog` — каталог навыков, требований и событий для вошедшего пользователя.
 - `available_steps` — допустимые мероприятия с `expected_gains:[{skill_id,before,after,gain,gap_closed,critical}]`, `action:start|continue`, `activity_record_id`, `next_session`.
 - `POST /api/me/activities/{event_id}/start` JSON `{session_date?:"YYYY-MM-DD"}`. Возвращает запись участия.
-- `POST /api/me/activities/{event_id}/complete` JSON `{session_date?:"YYYY-MM-DD",activity_record_id?:"..."}`. Обязателен заголовок `Idempotency-Key` (новый UUID для нового действия, тот же при повторе запроса). Ответ `{record,changes:[{skill_id,before,after}],profile}`.
+- `POST /api/me/activities/{event_id}/complete` JSON `{session_date?:"YYYY-MM-DD",activity_record_id?:"..."}`. Обязателен заголовок `Idempotency-Key` (новый UUID для нового действия, тот же при повторе запроса). Ответ `{record,changes:[{skill_id,before,after}],profile,reward,gamification}`; дополнительные поля наград описаны ниже.
 
 Дату будущей сессии нельзя отмечать выполненной. Для запланированного мероприятия сначала создать/использовать запись участия; для self-paced разрешено сразу завершить. Повторное завершение не даёт прироста, для EV_036 уникальна дата посещения. Нет endpoint для произвольного редактирования навыков.
+
+## Личные достижения
+
+Только роль employee и только собственный профиль; изменяющие запросы требуют CSRF. По умолчанию участие выключено. Эти данные не входят в HR-профиль, HR-аналитику и контекст AI.
+
+- `GET /api/me/gamification` — состояние достижений.
+- `PATCH /api/me/gamification` JSON `{enabled:true|false}` — включить/приостановить, без потери XP.
+- `POST /api/me/gamification/quest` JSON `{event_id:"..."}` — выбрать доступный полезный шаг; при выключенном участии или недоступном шаге 409.
+- `DELETE /api/me/gamification/quest` — снять квест без штрафа.
+
+Все четыре маршрута возвращают `{enabled,xp,level,level_name,level_progress:{current,required},completed_count,skill_levels_gained,badges,quest,recent_rewards,rules,privacy}`. На максимальном уровне `required=null`. `quest` равен null либо `{event_id,title,status,expected_gains,unavailable_reasons}`; status: `active|paused|unavailable|completed`.
+
+При завершении `reward={awarded,xp,gained_levels,reason}` описывает награду именно этого действия, а `gamification` — итоговое состояние. Повтор с тем же Idempotency-Key возвращает исходный ответ; UI не должен прибавлять его XP к собственному счётчику. Всегда отображать серверное суммарное значение. Подробные правила: [GAMIFICATION.md](GAMIFICATION.md).
 
 ## Импорт
 

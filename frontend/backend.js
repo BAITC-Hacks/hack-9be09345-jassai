@@ -5,12 +5,12 @@ export function normalizeProfile(raw,catalog,rec=null){
   const skills=new Map((catalog.skills||[]).map(s=>[s.skill_id,s.name]));
   const events=new Map((catalog.events||[]).map(e=>[e.event_id,e]));
   const t=raw.trajectory, target=t.target;
-  const history=[...raw.history].reverse().map(r=>({...r,title:events.get(r.event_id)?.title||r.event_id,can_complete:r.status==='in_progress'&&(events.get(r.event_id)?.format==='self_paced'||r.date<=raw.as_of_date)}));
+  const history=[...raw.history].reverse().map(r=>{const event=events.get(r.event_id);return {...r,title:event?.title||r.event_id,can_complete:!!event&&!event.mandatory&&r.status==='in_progress'&&(event.format==='self_paced'||r.date<=raw.as_of_date)};});
   const emptyStatus=!target.goal?'no_goal':t.coverage_pct===100?'goal_achieved':!raw.available_steps.length?'no_candidates':null;
   return {employee:raw.employee,as_of_date:raw.as_of_date,goal:target.goal?{...target.goal,source:target.source==='suggested_next_grade'?'suggested':target.source}:null,
     goal_options:(catalog.role_profiles||[]).map(r=>({target_role:r.role,target_grade:r.grade})),
     coverage_pct:t.coverage_pct,critical_gap_count:t.critical_gaps.length,completed_count:raw.history.filter(r=>r.status==='completed').length,
-    skills:t.skills,history,available_steps:raw.available_steps.map(event=>({...event,record_id:event.activity_record_id,session_date:event.next_session,can_complete:event.format==='self_paced'||event.next_session<=raw.as_of_date,gains:event.expected_gains||[]})),recommendations:rec||(emptyStatus?{status:emptyStatus,source:'none',reasons:Object.keys(raw.no_step_reasons||{})}:null),
+    skills:t.skills,history,available_steps:raw.available_steps.map(event=>({...event,record_id:event.activity_record_id,session_date:event.next_session,can_complete:!event.mandatory&&(event.format==='self_paced'||event.next_session<=raw.as_of_date),gains:event.expected_gains||[]})),recommendations:rec||(emptyStatus?{status:emptyStatus,source:'none',reasons:Object.keys(raw.no_step_reasons||{})}:null),
     skill_names:Object.fromEntries(skills)};
 }
 export function normalizeRecommendations(raw,profile,catalog){
@@ -59,7 +59,7 @@ export function createBackendAdapter(rawApi){
       const result=await rawApi(`/api/me/activities/${encodeURIComponent(record.event_id)}/complete`,{...options,body:{activity_record_id:id}});
       recommendationCache=null;lastProfile=result.profile;
       const cat=await getCatalog(),names=new Map(cat.skills.map(s=>[s.skill_id,s.name]));
-      return {applied:true,changes:result.changes.map(g=>({...g,name:names.get(g.skill_id)||g.skill_id})),coverage_before:before,coverage_after:result.profile.trajectory.coverage_pct};
+      return {applied:result.applied!==false,changes:result.changes.map(g=>({...g,name:names.get(g.skill_id)||g.skill_id})),coverage_before:before,coverage_after:result.profile.trajectory.coverage_pct,reward:result.reward,gamification:result.gamification};
     }
     if(path==='/api/hr/overview')return normalizeOverview(await rawApi(path,options));
     if(path==='/api/hr/import/validate'){
