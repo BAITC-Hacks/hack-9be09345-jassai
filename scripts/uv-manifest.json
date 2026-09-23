@@ -1,0 +1,6 @@
+{
+  "version": "0.12.17",
+  "asset": "uv-x86_64-pc-windows-msvc.zip",
+  "url": "https://github.com/astral-sh/uv/releases/download/0.12.17/uv-x86_64-pc-windows-msvc.zip",
+  "sha256": "a252121d5b59398fcb137c6ea448176459a44010f33f67e0072305a637119ca7"
+}
