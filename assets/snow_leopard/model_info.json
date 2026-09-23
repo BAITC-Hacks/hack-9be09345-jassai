@@ -1,0 +1,20 @@
+{
+  "blend": "Irbis_SnowLeopard.blend",
+  "glb": "Irbis_SnowLeopard.glb",
+  "mesh_objects": 145,
+  "vertices": 138944,
+  "bones": 27,
+  "actions": [
+    "Idle_Breathe",
+    "Idle_LookAround"
+  ],
+  "generator": "source/build_character.py",
+  "glb_export": {
+    "source_meshes": 145,
+    "export_meshes": 1,
+    "material_primitives": 14,
+    "vertices": 138944,
+    "faces": 129604,
+    "bytes": 16257216
+  }
+}

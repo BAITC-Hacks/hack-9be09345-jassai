@@ -1,0 +1,98 @@
+{
+  "asset": "Irbis_SnowLeopard.glb",
+  "sha256": "06cc6178fca21474726487d1afd0cfc4ac52fe194b8d964068d878bc0725657e",
+  "bytes": 16257216,
+  "checked_at": "2026-09-23T12:06:59+00:00",
+  "glb_version": 2,
+  "scenes": 1,
+  "meshes": 1,
+  "material_primitives": 14,
+  "exported_vertices": 149786,
+  "materials": 14,
+  "skins": 1,
+  "joints": 27,
+  "embedded_images": 6,
+  "external_dependencies": false,
+  "unexpected_scene_objects": [],
+  "mesh_space_bounds_gltf_y_up": {
+    "min": [
+      -0.9419851303100586,
+      0,
+      -0.8379769325256348
+    ],
+    "max": [
+      1.6529736518859863,
+      3.97245192527771,
+      0.5971555113792419
+    ]
+  },
+  "all_accessors_finite": true,
+  "skin_weights_max_sum_error": 2.9802322387695312e-8,
+  "normals": {
+    "count": 149786,
+    "length_min": 0.9999999142328665,
+    "length_max": 1.0000001152000833,
+    "zero_or_nonfinite": 0
+  },
+  "animations": {
+    "Idle_Breathe": {
+      "seconds": 5,
+      "loop_seam_max": 0,
+      "channels": 81,
+      "fixed_root_and_legs_max_error": 0
+    },
+    "Idle_LookAround": {
+      "seconds": 8,
+      "loop_seam_max": 0,
+      "channels": 81,
+      "fixed_root_and_legs_max_error": 0
+    }
+  },
+  "status": "passed",
+  "blender_reimport": {
+    "blender_version": "5.2.2 LTS",
+    "character_meshes": 1,
+    "armatures": 1,
+    "bones": 27,
+    "actions": [
+      "Idle_Breathe",
+      "Idle_LookAround"
+    ],
+    "material_slots": 14,
+    "packed_images": 6,
+    "importer_generated_hidden_bone_shape_helpers": 1,
+    "skin_modifier_valid": true,
+    "posed_corner_normals": {
+      "count": 752544,
+      "zero_count": 0,
+      "length_min": 0.0019135581853195964,
+      "length_max": 1.0000001730216888,
+      "note": "Evaluated lengths vary after import and posing; all source glTF normals are normalized and no evaluated normals are zero."
+    },
+    "posed_bounds_blender_z_up": {
+      "min": [
+        -0.9440509676933289,
+        -0.6482610106468201,
+        -6.541015977745701e-7
+      ],
+      "max": [
+        1.6591800451278687,
+        0.8719739317893982,
+        3.9778928756713867
+      ]
+    },
+    "smoke_render": {
+      "engine": "Cycles",
+      "device": "CPU",
+      "resolution": [
+        480,
+        600
+      ],
+      "action": "Idle_LookAround",
+      "frame": 49,
+      "completed": true,
+      "visually_inspected": true,
+      "observation": "Materials and skinning are intact; no missing textures or visible normal artifacts in the inspected frame."
+    }
+  }
+}

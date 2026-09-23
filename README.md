@@ -130,3 +130,20 @@ uv run python -m app serve --port 8000
 
 Источники локальных материалов интерфейса: [фотография Campaign Creators](https://unsplash.com/photos/people-sitting-near-table-with-laptop-computer-qCi_MzVODoU) по [Unsplash License](https://unsplash.com/license), иллюстрация офиса, не фотографии сотрудников Halyk; [Manrope / Google Fonts](https://github.com/google/fonts/tree/main/ofl/manrope), лицензия [SIL OFL](frontend/assets/MANROPE_LICENSE.txt). SVG-иконки созданы для проекта; надпись Halyk / Career Quest — текстовое оформление проекта.
 
+## 3D-персонаж
+
+В `assets/snow_leopard/` находится стилизованный снежный барс по предоставленному концепту: изумрудный чапан, орнамент, светлый свитер и пятнистый хвост. Это отдельный подготовленный ресурс; интерфейс приложения пока его не загружает.
+
+- `Irbis_SnowLeopard.blend` — редактируемые части, 27 костей, упакованные текстуры и студийный свет. Открыть в Blender 5.2+ или через `Open_Model.cmd`; Space запускает анимацию. В Dope Sheet → Action Editor выбрать `Idle_Breathe` или `Idle_LookAround` у `IRBIS_Rig`.
+- `Irbis_SnowLeopard.glb` — автономная модель для glTF-совместимого просмотрщика/движка: один skinned mesh, 14 материалов, текстуры внутри файла. Клипы `Idle_Breathe` (5 секунд) и `Idle_LookAround` (8 секунд) зациклены, 24 кадра/с. Первый содержит дыхание, моргание и движение хвоста; второй — дополнительные повороты головы и ушей. Для второго клипа в Blender установить конец воспроизведения на кадр 192; первого — 120.
+- `previews/` — PNG с ракурсами и MP4/GIF обеих анимаций. `source/` — генераторы геометрии, материалов, рига, экспорта и превью; `model_info.json` — характеристики модели. Мех стилизован текстурой и короткими геометрическими прядями; симуляции волос/ткани нет.
+
+Воспроизведение из корня репозитория, если Blender и FFmpeg доступны в PATH:
+
+```powershell
+blender --background --python assets/snow_leopard/source/build_character.py
+blender --background assets/snow_leopard/Irbis_SnowLeopard.blend --python assets/snow_leopard/source/render_previews.py
+```
+
+Первая команда пересоздаёт модель, GLB и портрет; вторая рендерит оба полных цикла и ракурсы, затем FFmpeg кодирует видео/GIF. Внешние AI-сервисы не нужны; промежуточные кадры сохраняются в `.runtime/`.
+

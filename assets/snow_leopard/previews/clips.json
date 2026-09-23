@@ -1,0 +1,16 @@
+[
+  {
+    "name": "Idle_Breathe",
+    "fps": 24,
+    "frames": 120,
+    "duration": 5.0,
+    "mp4": "Idle_Breathe.mp4"
+  },
+  {
+    "name": "Idle_LookAround",
+    "fps": 24,
+    "frames": 192,
+    "duration": 8.0,
+    "mp4": "Idle_LookAround.mp4"
+  }
+]
