@@ -6,4 +6,4 @@ export const labels={completed:'Завершено',in_progress:'В процес
 Object.assign(labels,{role_not_eligible:'Не подходит текущая роль',grade_not_eligible:'Не подходит текущий грейд',prerequisites_not_met:'Нужна предварительная подготовка',already_completed:'Уже пройдено',no_available_session:'Нет доступной сессии',goal_not_set:'Цель не выбрана',no_target_gain:'Нет прироста для цели',mandatory:'Обязательное мероприятие'});
 export const label=value=>labels[value]||value||'—';
 export function validRecommendation(item){return typeof item.event_id==='string'&&Array.isArray(item.factors)&&item.factors.filter(f=>typeof(f.text??f)==='string'&&String(f.text??f).trim()).length>=3;}
-export function sourceLabel(result){if(result.source==='ai')return result.cached?'AI · сохранённый ответ':'AI-рекомендации';if(result.source==='preview')return 'Пример интерфейса';return 'Резервный подбор · без AI';}
+export function sourceLabel(result){if(result.source==='ai')return result.cached?'AI · сохранённый ответ':'AI-рекомендации';if(result.source==='preview')return 'Пример интерфейса';if(result.source==='none')return 'Состояние траектории';return 'Резервный подбор · без AI';}

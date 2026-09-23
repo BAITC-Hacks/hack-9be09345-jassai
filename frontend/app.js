@@ -79,7 +79,7 @@ document.addEventListener('click',async event=>{
       const id=control.dataset.id,key=keyFor(action,id);
       const result=await api(action==='start'?'/api/me/activities':`/api/me/activities/${encodeURIComponent(id)}/complete`,{method:'POST',idempotencyKey:key.value,body:action==='start'?{event_id:id,session_date:control.dataset.session||null}:{}});
       key.clear();
-      if(action==='complete')state.completion=result;
+      if(action==='complete'){state.completion=result;if(location.hash!=='#home')history.pushState(null,'',location.pathname+location.search+'#home');}
       notice(action==='start'?'Активность начата. Она доступна в вашей истории.':result.applied===false?'Это выполнение уже учтено.':'Выполнение сохранено. Обновляем траекторию.');
       await renderRoute();
       if(action==='complete'&&(!location.hash||location.hash==='#home'))await recommend();
@@ -152,7 +152,7 @@ document.addEventListener('submit',async event=>{
       if(primary===fallback)throw new ApiError('Основной и резервный провайдер должны различаться.');
       await api('/api/hr/settings/ai/policy',{method:'PATCH',body:{primary_provider:primary,fallback_provider:fallback,total_timeout_ms:10000}});notice('Режим рекомендаций сохранён.');
     }
-  }catch(error){if(form.isConnected&&form.querySelector('.form-error'))formError(form,error);else notice(error.message);if(form.id==='import-form'){state.batch=null;document.querySelector('#import-result').innerHTML='';}if(error.status===401&&form.id!=='login-form'){resetPrivateState();await renderRoute();}}
+  }catch(error){if(form.isConnected&&form.querySelector('.form-error'))formError(form,error);else notice(error.message);if(form.id==='import-form'){state.batch=null;const result=document.querySelector('#import-result');if(result)result.innerHTML='';}if(error.status===401&&form.id!=='login-form'){resetPrivateState();await renderRoute();}}
   finally{if(form.classList.contains('provider-form'))form.elements.api_key.value='';if(submit?.isConnected)submit.disabled=false;}
 });
 
