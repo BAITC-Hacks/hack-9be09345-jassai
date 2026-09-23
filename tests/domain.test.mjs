@@ -60,6 +60,52 @@ test('filters use format, duration and skills together without changing eligibil
   const p=await createPreview()('/api/me');const rows=filterEvents(p,{tab:'all',format:'self_paced',duration:'2',skills:['analytics'],search:'данных'});
   assert.deepEqual(rows.map(e=>e.event_id),['DEMO_DESIGN']);assert.equal(rows[0].eligible,true);
 });
+test('history replay uses backend ASCII ordering for same-day mixed-case record IDs',()=>{
+  const profile={
+    employee:{skills:{S:1},last_review_date:'2026-09-10'},as_of_date:'2026-10-01',
+    goal:{target_role:'Engineer',target_grade:'Senior'},
+    raw_trajectory:{target:{requirements:{S:5},critical_skills:['S']}},
+    effective_skills:{S:5},skill_names:{S:'Architecture'},
+    catalog_events:[
+      {event_id:'E_BIG',title:'Big step',develops_skills:[{skill_id:'S',gain:3,max_level:4}]},
+      {event_id:'E_SMALL',title:'Small step',develops_skills:[{skill_id:'S',gain:1,max_level:5}]},
+    ],
+    raw_history:[
+      {record_id:'A',event_id:'E_BIG',date:'2026-09-20',status:'completed'},
+      {record_id:'a',event_id:'E_SMALL',date:'2026-09-20',status:'completed'},
+    ],
+  };
+  const timeline=skillTimeline(profile,'S');
+  assert.deepEqual(timeline.filter(item=>item.kind==='activity').map(item=>[item.record_id,item.before,item.after]),[['A',1,4],['a',4,5]]);
+  assert.equal(timeline.at(-1).after,profile.effective_skills.S);
+  const result=historyResult(profile,'A');
+  assert.deepEqual(result.changes,[{skill_id:'S',name:'Architecture',before:1,after:4}]);
+  assert.equal(result.coverage_before,20);assert.equal(result.coverage_after,80);
+});
+function coverageFixture(total,covered){
+  const requirements={},levels={};let remaining=covered;
+  for(let i=0;i<Math.ceil(total/5);i++){
+    const id=`S${i}`,required=Math.min(5,total-i*5);
+    requirements[id]=required;levels[id]=Math.min(required,remaining);remaining-=levels[id];
+  }
+  const skill=Object.keys(requirements).find(id=>levels[id]<requirements[id]);
+  const event={event_id:'E',title:'Step',format:'self_paced',mandatory:false,target_roles:['Engineer'],target_grades:['Middle'],prerequisites:{},upcoming_sessions:[],develops_skills:[{skill_id:skill,gain:1,max_level:requirements[skill]}],expected_gains:[{skill_id:skill,before:levels[skill],after:levels[skill]+1}]};
+  return {employee:{role:'Engineer',grade:'Middle'},goal:{target_role:'Engineer',target_grade:'Senior'},as_of_date:'2026-10-01',effective_skills:levels,raw_trajectory:{target:{requirements,critical_skills:[]}},raw_history:[],catalog_events:[event],available_steps:[event]};
+}
+test('forecast coverage matches Python ties-to-even at .125 and .625 percent',()=>{
+  const before=forecast(coverageFixture(32,25),'E');
+  assert.equal(before.coverage_before,78.12);assert.equal(before.coverage_after,81.25);
+  const after=forecast(coverageFixture(32,12),'E');
+  assert.equal(after.coverage_before,37.5);assert.equal(after.coverage_after,40.62);
+});
+test('forecast rounds the original binary float like Python, not a prematurely scaled value',()=>{
+  const result=forecast(coverageFixture(4000,106),'E');
+  assert.equal(result.coverage_before,2.65);assert.equal(result.coverage_after,2.67);
+});
+test('forecast uses authoritative current coverage from the API when provided',()=>{
+  const profile=coverageFixture(32,25);profile.coverage_pct=78.12;
+  assert.equal(forecast(profile,'E').coverage_before,profile.coverage_pct);
+});
 test('HR categories separate no goal and goal covered from help and count people once per reason',()=>{
   const goal={target_role:'Analyst',target_grade:'Senior'};
   const r=normalizeOverview({employees_without_step:[{employee_id:'a',goal:null,reasons:{goal_not_set:40}},{employee_id:'b',goal,coverage_pct:100,reasons:{no_target_gain:40}},{employee_id:'c',goal,coverage_pct:70,reasons:{prerequisites_not_met:20,no_available_session:10,mandatory:3}},{employee_id:'d',goal,coverage_pct:50,reasons:{prerequisites_not_met:10}}]});

@@ -11,7 +11,7 @@ import uuid
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -22,7 +22,11 @@ from app.config import Settings
 from app.db import Database, all_entities, bump_revision, encode, get_entity, get_meta, put_entity, revision, snapshot
 from app.domain import hr_overview, profile_view, recommendation_context, role_key
 from app.imports import MAX_FILE_BYTES, apply_validated, validate_files
+from app.seed import BUNDLED_DATA_DIR, read_seed_files, seed_dataset
 from app.gamification import choose_quest, clear_quest, gamification_view, set_enabled
+from app.companion import companion_view, equip_item
+from app.companion_chat import CompanionCoach, compact_facts
+from app.models import CompanionChat, CompanionEquip
 from app.models import AIResult, ApplyImport, Completion, GamificationSettings, GoalChange, Login, NewUser, PersonalQuest, Setup
 
 
@@ -48,6 +52,7 @@ def create_app(settings=None, recommender=None):
     @asynccontextmanager
     async def lifespan(application):
         db.initialize()
+        seed_dataset(db, settings.seed_data_dir)
         auth.initialize_bootstrap(db, settings)
         provider = recommender
         if provider is None and settings.recommender:
@@ -59,12 +64,16 @@ def create_app(settings=None, recommender=None):
         with db.connection(write=True) as conn:
             # Provider code/configuration may have changed while data stayed the same.
             conn.execute("DELETE FROM recommendation_cache")
-        yield
+        try:
+            yield
+        finally:
+            await application.state.companion_coach.close()
 
     app = FastAPI(title="Career Quest API", version="0.1.0", lifespan=lifespan)
     app.state.db = db
     app.state.settings = settings
     app.state.recommender = recommender
+    app.state.companion_coach = CompanionCoach()
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"] + (["testserver"] if settings.testing else []))
 
     @app.middleware("http")
@@ -231,6 +240,39 @@ def create_app(settings=None, recommender=None):
             clear_quest(conn, employee["employee_id"])
             return gamification_view(conn, employee, data, as_of)
 
+    @app.get("/api/me/companion")
+    def companion(user=Depends(auth.current_user)):
+        auth.require_role(user, "employee")
+        with db.connection() as conn:
+            employee, data, as_of = load_employee(conn, user["employee_id"])
+            return companion_view(conn, employee, data, as_of)
+
+    @app.post("/api/me/companion/equip")
+    def companion_equip(body: CompanionEquip, user=Depends(auth.current_user)):
+        auth.require_role(user, "employee")
+        with db.connection(write=True) as conn:
+            employee, data, as_of = load_employee(conn, user["employee_id"])
+            return equip_item(conn, employee, data, as_of, body.item_id)
+
+    @app.post("/api/me/companion/chat")
+    async def companion_chat(body: CompanionChat, user=Depends(auth.current_user)):
+        auth.require_role(user, "employee")
+        with db.connection() as conn:
+            employee, data, as_of = load_employee(conn, user["employee_id"])
+            context = recommendation_context(employee, data, as_of, revision(conn))
+            context["skill_names"] = {key: value["name"] for key, value in data["skills"].items()}
+            if body.event_id:
+                context["candidates"].sort(key=lambda event: event["event_id"] != body.event_id)
+            facts = compact_facts(context, companion_view(conn, employee, data, as_of))
+
+        async def lines():
+            async for item in app.state.companion_coach.stream(
+                user["employee_id"], facts, body.message.strip(),
+                [turn.model_dump() for turn in body.history], body.event_id, body.skill_id,
+            ):
+                yield json.dumps(item, ensure_ascii=False) + "\n"
+        return StreamingResponse(lines(), media_type="application/x-ndjson", headers={"X-Accel-Buffering": "no"})
+
     @app.post("/api/me/activities/{event_id}/start")
     def start(event_id: str, body: Completion, user=Depends(auth.current_user)):
         auth.require_role(user, "employee")
@@ -278,6 +320,25 @@ def create_app(settings=None, recommender=None):
                 error(422, "invalid_period")
             return hr_overview(snapshot(conn), as_of, date_from.isoformat() if date_from else None, date_to.isoformat() if date_to else None)
 
+    def validate_import_batch(uploads, mode, user):
+        with db.connection(write=True) as conn:
+            report, incoming = validate_files(conn, uploads, mode)
+            if report["valid"]:
+                batch_id = uuid.uuid4().hex
+                conn.execute("DELETE FROM import_batches WHERE applied=0 AND created_at<?", (time.time() - 86400,))
+                conn.execute("INSERT INTO import_batches VALUES (?,?,?,?,?,0,?)", (batch_id, user["username"], revision(conn), encode(incoming), encode(report), time.time()))
+                report["batch_id"] = batch_id
+            return report
+
+    @app.post("/api/hr/import/starter")
+    def validate_starter_import(user=Depends(auth.current_user)):
+        auth.require_role(user, "hr")
+        try:
+            uploads = read_seed_files(BUNDLED_DATA_DIR)
+        except RuntimeError:
+            error(503, "starter_data_unavailable")
+        return validate_import_batch(uploads, "add", user)
+
     @app.post("/api/hr/import/validate")
     async def validate_import(files: list[UploadFile] = File(...), mode: str = Form("add"), user=Depends(auth.current_user)):
         auth.require_role(user, "hr")
@@ -293,16 +354,7 @@ def create_app(settings=None, recommender=None):
                 error(413, "file_too_large")
             uploads[file.filename] = content
 
-        def validate_and_store():
-            with db.connection(write=True) as conn:
-                report, incoming = validate_files(conn, uploads, mode)
-                if report["valid"]:
-                    batch_id = uuid.uuid4().hex
-                    conn.execute("DELETE FROM import_batches WHERE applied=0 AND created_at<?", (time.time() - 86400,))
-                    conn.execute("INSERT INTO import_batches VALUES (?,?,?,?,?,0,?)", (batch_id, user["username"], revision(conn), encode(incoming), encode(report), time.time()))
-                    report["batch_id"] = batch_id
-                return report
-        return await asyncio.to_thread(validate_and_store)
+        return await asyncio.to_thread(validate_import_batch, uploads, mode, user)
 
     @app.post("/api/hr/import/apply")
     def apply_import(body: ApplyImport, user=Depends(auth.current_user)):

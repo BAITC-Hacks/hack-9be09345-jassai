@@ -1,4 +1,4 @@
-"""B provider for the team's API_CONTRACT v1.0; no database or UI mutations."""
+"""Recommendation provider for the server API; no database or UI mutations."""
 
 from __future__ import annotations
 

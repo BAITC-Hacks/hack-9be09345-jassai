@@ -1,0 +1,81 @@
+{
+  "meta": {
+    "dataset": "Career Quest — вымышленная демонстрационная выборка",
+    "version": "1.0",
+    "as_of_date": "2026-10-01",
+    "description": "Все мероприятия учебные и вымышленные. Реальные записи и внешние регистрации отсутствуют."
+  },
+  "events": [
+    {
+      "event_id": "DEMO_EV_DESIGN",
+      "title": "Практика проектирования сервисов (демо)",
+      "description": "Основной шаг демонстрации: разобрать границы простого сервиса и оформить схему взаимодействий. После выполнения растёт навык проектирования и открывается практикум по надёжности.",
+      "type": "course", "format": "self_paced", "duration_hours": 2, "mandatory": false,
+      "target_roles": ["Инженер"], "target_grades": ["Middle", "Senior", "Lead"],
+      "develops_skills": [{"skill_id": "DEMO_ARCH", "gain": 2, "max_level": 4}],
+      "prerequisites": {}, "upcoming_sessions": []
+    },
+    {
+      "event_id": "DEMO_EV_RELIABILITY",
+      "title": "Надёжность сервиса: разбор отказов (демо)",
+      "description": "Составить сценарии отказа и план проверки. Доступно после достижения четвёртого уровня проектирования сервисов.",
+      "type": "workshop", "format": "self_paced", "duration_hours": 1.5, "mandatory": false,
+      "target_roles": ["Инженер"], "target_grades": ["Middle", "Senior", "Lead"],
+      "develops_skills": [{"skill_id": "DEMO_TEST", "gain": 1, "max_level": 4}],
+      "prerequisites": {"DEMO_ARCH": 4}, "upcoming_sessions": []
+    },
+    {
+      "event_id": "DEMO_EV_PRESENT",
+      "title": "Короткая презентация решения (демо)",
+      "description": "Подготовить трёхминутное объяснение решения, включая проверяемый результат и ограничения.",
+      "type": "course", "format": "self_paced", "duration_hours": 1, "mandatory": false,
+      "target_roles": ["Инженер", "Аналитик"], "target_grades": ["Junior", "Middle", "Senior", "Lead"],
+      "develops_skills": [{"skill_id": "DEMO_COMM", "gain": 1, "max_level": 4}],
+      "prerequisites": {}, "upcoming_sessions": []
+    },
+    {
+      "event_id": "DEMO_EV_MAND",
+      "title": "Вводный инструктаж (демо)",
+      "description": "Обязательная активность для демонстрации её исключения из добровольных рекомендаций и личных наград.",
+      "type": "compliance", "format": "self_paced", "duration_hours": 0.5, "mandatory": true,
+      "target_roles": ["Инженер", "Аналитик"], "target_grades": ["Junior", "Middle", "Senior", "Lead"],
+      "develops_skills": [], "prerequisites": {}, "upcoming_sessions": []
+    },
+    {
+      "event_id": "DEMO_EV_FUTURE",
+      "title": "Разбор командного кейса (демо)",
+      "description": "Онлайн-встреча в будущем относительно даты среза. Можно записаться, но нельзя отметить её завершение до даты сессии.",
+      "type": "workshop", "format": "online", "duration_hours": 1.5, "mandatory": false,
+      "target_roles": ["Инженер", "Аналитик"], "target_grades": ["Junior", "Middle", "Senior", "Lead"],
+      "develops_skills": [{"skill_id": "DEMO_COMM", "gain": 1, "max_level": 4}],
+      "prerequisites": {}, "upcoming_sessions": ["2026-10-10"]
+    },
+    {
+      "event_id": "DEMO_EV_ARCH_BASE",
+      "title": "Основы схем сервисов (демо)",
+      "description": "В истории первого профиля эта активность завершена после последней оценки. Её прирост учитывается при расчёте текущего навыка.",
+      "type": "course", "format": "self_paced", "duration_hours": 1, "mandatory": false,
+      "target_roles": ["Инженер"], "target_grades": ["Junior", "Middle", "Senior", "Lead"],
+      "develops_skills": [{"skill_id": "DEMO_ARCH", "gain": 1, "max_level": 3}],
+      "prerequisites": {}, "upcoming_sessions": []
+    },
+    {
+      "event_id": "DEMO_EV_SQL",
+      "title": "SQL: базовый запрос (демо)",
+      "description": "В истории первого профиля завершено до последней оценки и уже включено в базовый уровень. Второму профилю доступно как дополнительный шаг.",
+      "type": "course", "format": "self_paced", "duration_hours": 1, "mandatory": false,
+      "target_roles": ["Инженер", "Аналитик"], "target_grades": ["Junior", "Middle", "Senior", "Lead"],
+      "develops_skills": [{"skill_id": "DEMO_SQL", "gain": 1, "max_level": 3}],
+      "prerequisites": {}, "upcoming_sessions": []
+    },
+    {
+      "event_id": "DEMO_EV_ANALYSIS",
+      "title": "Проверяемая аналитическая сводка (демо)",
+      "description": "Подготовить запрос и проверить результат на контрольных примерах. Во втором профиле уже начата: можно продолжить из истории.",
+      "type": "course", "format": "self_paced", "duration_hours": 2, "mandatory": false,
+      "target_roles": ["Аналитик"], "target_grades": ["Middle", "Senior", "Lead"],
+      "develops_skills": [{"skill_id": "DEMO_SQL", "gain": 2, "max_level": 4}, {"skill_id": "DEMO_TEST", "gain": 1, "max_level": 2}],
+      "prerequisites": {"DEMO_SQL": 1}, "upcoming_sessions": []
+    }
+  ]
+}

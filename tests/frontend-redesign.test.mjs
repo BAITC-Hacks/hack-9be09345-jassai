@@ -13,12 +13,12 @@ test('HR profile is read-only even when the employee has a completable activity'
   assert.ok(html.includes('Просмотр HR'));assert.ok(html.includes('Решения на основе данных'));
 });
 
-test('initial import requires four files; additional import permits either supported file',()=>{
+test('initial import requires four files; additional import accepts any supported subset',()=>{
   const fileInputs=html=>[...html.matchAll(/<input\b[^>]*type="file"[^>]*>/g)].map(match=>match[0]);
   const initial=fileInputs(importView(true)),additional=fileInputs(importView(false));
   assert.equal(initial.length,4);assert.ok(initial.every(input=>/\brequired\b/.test(input)));
-  assert.equal(additional.length,2);assert.ok(additional.every(input=>!/\brequired\b/.test(input)));
-  assert.ok(additional.some(input=>input.includes('employees.json')));assert.ok(additional.some(input=>input.includes('activity_history.csv')));
+  assert.equal(additional.length,4);assert.ok(additional.every(input=>!/\brequired\b/.test(input)));
+  for(const name of ['employees.json','skills.json','events.json','activity_history.csv'])assert.ok(additional.some(input=>input.includes(`name="${name}"`)));
 });
 
 test('preview bootstrap and import reach loaded HR workspace without falsely configuring AI',async()=>{

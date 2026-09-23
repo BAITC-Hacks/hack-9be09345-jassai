@@ -1,6 +1,9 @@
 // Read-only previews of published server rules. Never authorizes an API action.
 const number=value=>typeof value==='number'&&Number.isFinite(value);
-const ordered=rows=>[...rows].sort((a,b)=>String(a.date).localeCompare(String(b.date))||String(a.completed_at||'').localeCompare(String(b.completed_at||''))||String(a.record_id).localeCompare(String(b.record_id)));
+// API dates/timestamps and IDs are ASCII: match Python's tuple ordering exactly.
+// Locale collation can swap uppercase/lowercase IDs and change capped skill gains.
+const compare=(a,b)=>String(a)<String(b)?-1:String(a)>String(b)?1:0;
+const ordered=rows=>[...rows].sort((a,b)=>compare(a.date,b.date)||compare(a.completed_at||'',b.completed_at||'')||compare(a.record_id,b.record_id));
 const history=profile=>profile.raw_history||profile.history||[];
 const catalog=profile=>profile.catalog_events||[];
 const names=profile=>profile.skill_names||Object.fromEntries((profile.all_skills||[]).map(s=>[s.skill_id,s.name]));
@@ -9,9 +12,24 @@ const critical=profile=>profile.raw_trajectory?.target?.critical_skills||(profil
 const level=(levels,id)=>levels[id]??0;
 function validLevels(levels){return levels&&typeof levels==='object'&&Object.values(levels).every(v=>number(v)&&v>=0&&v<=5);}
 function hasTarget(profile){const req=requirements(profile);return !!profile.goal&&req&&Object.keys(req).length>0&&Object.values(req).every(v=>number(v)&&v>=0&&v<=5);}
+function coveragePercent(covered,total){
+  if(!total)return null;
+  const value=100*covered/total;
+  if(value===0)return 0;
+  // Python round(value, 2) rounds the actual binary float, with ties to even.
+  // Rounding value*100 instead loses precision at boundaries such as 2.675.
+  const bytes=new DataView(new ArrayBuffer(8));bytes.setFloat64(0,value);
+  const bits=bytes.getBigUint64(0),exponent=Number((bits>>52n)&0x7ffn)-1023-52;
+  let numerator=((bits&((1n<<52n)-1n))|(1n<<52n))*100n;
+  const denominator=exponent<0?1n<<BigInt(-exponent):1n;
+  if(exponent>0)numerator<<=BigInt(exponent);
+  let rounded=numerator/denominator;const remainder=numerator%denominator;
+  if(2n*remainder>denominator||(2n*remainder===denominator&&rounded%2n===1n))rounded++;
+  return Number(rounded)/100;
+}
 function metrics(profile,levels){
   const req=requirements(profile),total=Object.values(req||{}).reduce((a,b)=>a+b,0);
-  return {coverage:total?Math.round(10000*Object.entries(req).reduce((sum,[id,value])=>sum+Math.min(level(levels,id),value),0)/total)/100:null,critical:critical(profile).filter(id=>level(levels,id)<(req?.[id]??0)).length};
+  return {coverage:coveragePercent(Object.entries(req||{}).reduce((sum,[id,value])=>sum+Math.min(level(levels,id),value),0),total),critical:critical(profile).filter(id=>level(levels,id)<(req?.[id]??0)).length};
 }
 function capped(levels,event){
   const after={...levels};
@@ -80,7 +98,7 @@ export function forecast(profile,input){
   if(!after)return unavailable('incomplete_data');
   const initial=metrics(profile,before),final=metrics(profile,after);
   const rows=history(profile).filter(r=>!(r.event_id===event.event_id&&r.status==='in_progress')).concat({event_id:event.event_id,status:'completed',date:event.session_date||profile.as_of_date});
-  return {available:true,reason:null,reasons:[],coverage_before:initial.coverage,coverage_after:final.coverage,critical_before:initial.critical,critical_after:final.critical,changes:delta(profile,before,after),unlocks:newlyAvailable(profile,before,after,rows)};
+  return {available:true,reason:null,reasons:[],coverage_before:number(profile.coverage_pct)?profile.coverage_pct:initial.coverage,coverage_after:final.coverage,critical_before:initial.critical,critical_after:final.critical,changes:delta(profile,before,after),unlocks:newlyAvailable(profile,before,after,rows)};
 }
 export function filterEvents(profile,{tab='suitable',search='',format='',duration='',skills=[]}={}){
   let ids=tab==='ongoing'?history(profile).filter(r=>r.status==='in_progress').map(r=>r.event_id):tab==='all'?catalog(profile).filter(e=>!e.mandatory).map(e=>e.event_id):(profile.available_steps||[]).map(e=>e.event_id);

@@ -1,0 +1,32 @@
+{
+  "meta": {
+    "dataset": "Career Quest — вымышленная демонстрационная выборка",
+    "version": "1.0",
+    "as_of_date": "2026-10-01",
+    "description": "Навыки и требования ролей придуманы для воспроизводимой демонстрации."
+  },
+  "proficiency_scale": {
+    "0": "Не оценён",
+    "1": "Основы",
+    "2": "Практика с поддержкой",
+    "3": "Самостоятельная работа",
+    "4": "Сложные задачи",
+    "5": "Экспертиза"
+  },
+  "skills": [
+    {"skill_id": "DEMO_ARCH", "name": "Проектирование сервисов", "type": "hard", "category": "Демо: разработка", "description": "Построение и объяснение архитектуры небольшого сервиса."},
+    {"skill_id": "DEMO_TEST", "name": "Проверка качества", "type": "hard", "category": "Демо: качество", "description": "Проверка гипотез и поведения системы с помощью воспроизводимых сценариев."},
+    {"skill_id": "DEMO_COMM", "name": "Презентация решений", "type": "soft", "category": "Демо: коммуникация", "description": "Краткое объяснение решения, его ограничений и результатов."},
+    {"skill_id": "DEMO_SQL", "name": "Анализ данных SQL", "type": "hard", "category": "Демо: аналитика", "description": "Получение и проверка сводных показателей с помощью SQL."}
+  ],
+  "role_profiles": [
+    {"role": "Инженер", "grade": "Junior", "required_skills": {"DEMO_ARCH": 1, "DEMO_TEST": 1, "DEMO_COMM": 1}, "critical_skills": ["DEMO_ARCH"]},
+    {"role": "Инженер", "grade": "Middle", "required_skills": {"DEMO_ARCH": 2, "DEMO_TEST": 2, "DEMO_COMM": 1}, "critical_skills": ["DEMO_ARCH"]},
+    {"role": "Инженер", "grade": "Senior", "required_skills": {"DEMO_ARCH": 4, "DEMO_TEST": 3, "DEMO_COMM": 2}, "critical_skills": ["DEMO_ARCH"]},
+    {"role": "Инженер", "grade": "Lead", "required_skills": {"DEMO_ARCH": 5, "DEMO_TEST": 4, "DEMO_COMM": 4}, "critical_skills": ["DEMO_ARCH", "DEMO_COMM"]},
+    {"role": "Аналитик", "grade": "Junior", "required_skills": {"DEMO_SQL": 1, "DEMO_TEST": 1, "DEMO_COMM": 1}, "critical_skills": ["DEMO_SQL"]},
+    {"role": "Аналитик", "grade": "Middle", "required_skills": {"DEMO_SQL": 2, "DEMO_TEST": 1, "DEMO_COMM": 1}, "critical_skills": ["DEMO_SQL"]},
+    {"role": "Аналитик", "grade": "Senior", "required_skills": {"DEMO_SQL": 4, "DEMO_TEST": 2, "DEMO_COMM": 2}, "critical_skills": ["DEMO_SQL"]},
+    {"role": "Аналитик", "grade": "Lead", "required_skills": {"DEMO_SQL": 5, "DEMO_TEST": 3, "DEMO_COMM": 4}, "critical_skills": ["DEMO_SQL", "DEMO_COMM"]}
+  ]
+}
