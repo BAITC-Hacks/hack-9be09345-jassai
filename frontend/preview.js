@@ -2,6 +2,7 @@
 import {ApiError} from './api.js';
 import {normalizeProfile,normalizeOverview,normalizeRecommendations} from './backend.js';
 import {forecast} from './domain.js';
+import {createCompanionPreview} from './companion-preview.js';
 export function createPreview(mode='employee'){
   const asof='2026-10-01',role='Product Analyst',req={analytics:4,sql:4,leadership:3,communication:3,feedback:3};
   let user=['login','setup'].includes(mode)?null:{user_id:'preview',username:'preview',display_name:mode==='hr'?'HR · пример':'Алиаскар · пример',role:mode==='hr'?'hr':'employee'};
@@ -34,6 +35,7 @@ export function createPreview(mode='employee'){
   function recommendation(){const p=rawProfile(),wanted=['DEMO_DESIGN','DEMO_MENTOR','DEMO_FEEDBACK'];if(!p.available_steps.length)return {...normalizeProfile(p,catalog).recommendations,source:'preview'};const selection=p.available_steps.filter(e=>wanted.includes(e.event_id)).slice(0,3),chosen=selection.length?selection:p.available_steps.slice(0,3);const wire={mode:'preview',recommendations:chosen.map(e=>({event_id:e.event_id,event:e,reason:'Пример объяснения на синтетических данных.',factors:[{type:'skill_gap',text:`${skills.find(s=>s.skill_id===e.expected_gains[0].skill_id).name}: ${e.expected_gains[0].before} → ${e.expected_gains[0].after}; требование цели ${p.trajectory.target.requirements[e.expected_gains[0].skill_id]}.`},{type:'goal',text:`Подходит роли ${main.role} и грейду ${main.grade}.`},{type:'duration',text:`Продолжительность ${e.duration_hours} ч${e.format==='self_paced'?'; в удобное время':'; доступная дата '+e.next_session}.`}]}))};return {...normalizeRecommendations(wire,p,catalog),source:'preview'};}
   rec=recommendation();
   const profile=person=>({...normalizeProfile(rawProfile(person),catalog,person&&person!==main?null:rec),completion_results:Object.fromEntries(outcomes)});
+  const companion=createCompanionPreview({getProfile:()=>rawProfile(),catalog});
   function overview(params){
     const rows=people.map(rawProfile),dateFrom=params.get('date_from'),dateTo=params.get('date_to')||asof,deficits=new Map();
     for(const row of rows)for(const s of row.trajectory.skills){if(!deficits.has(s.skill_id))deficits.set(s.skill_id,{skill_id:s.skill_id,name:s.name,target_population:0,employees_with_gap:0,critical_gaps:0});const d=deficits.get(s.skill_id);d.target_population++;d.employees_with_gap+=Number(s.gap>0);d.critical_gaps+=Number(s.critical&&s.gap>0);}
@@ -48,6 +50,16 @@ export function createPreview(mode='employee'){
     if(route==='/api/auth/logout'){user=null;return {};}
     if(route==='/api/auth/session'){if(!user)throw new ApiError('Войдите в приложение.',401);return {user,csrf_token:'preview-token'};}
     if(!user)throw new ApiError('Войдите в приложение.',401);
+    if(route.startsWith('/api/me/companion')||route.startsWith('/api/me/gamification')){
+      if(user.role!=='employee')throw new ApiError('У вашей учётной записи нет доступа.',403);
+      if(route==='/api/me/companion'&&method==='GET')return companion.view();
+      if(route==='/api/me/companion/equip'&&method==='POST')return companion.equip(body?.item_id);
+      if(route==='/api/me/gamification'&&method==='GET')return companion.view();
+      if(route==='/api/me/gamification'&&method==='PATCH')return companion.setEnabled(body?.enabled);
+      if(route==='/api/me/gamification/quest'&&method==='POST')return companion.chooseQuest(body?.event_id);
+      if(route==='/api/me/gamification/quest'&&method==='DELETE')return companion.clearQuest();
+      throw new ApiError('Операция недоступна в предпросмотре.',404);
+    }
     if(route==='/api/catalog')return structuredClone(catalog);
     if(route==='/api/me')return structuredClone(profile());
     if(/^\/api\/hr\/employees\/[^/]+$/.test(route)){const person=people.find(p=>p.employee_id===decodeURIComponent(route.split('/').at(-1)));if(!person)throw new ApiError('Профиль не найден в предпросмотре.',404);return structuredClone(profile(person));}
@@ -62,12 +74,14 @@ export function createPreview(mode='employee'){
       const id=decodeURIComponent(route.split('/').at(-2));if(outcomes.has(id))return {...structuredClone(outcomes.get(id)),applied:false,already_applied:true};
       const row=history.find(r=>r.record_id===id&&r.employee_id===main.employee_id);if(!row||row.status!=='in_progress'||row.date>asof)throw new ApiError('Активность нельзя завершить.',409);
       const before=profile(),prediction=forecast(before,row.event_id);if(!prediction.available)throw new ApiError('Прогноз недоступен.',409);
-      row.status='completed';row.completion_pct=100;row.session_date=row.date;row.date=asof;rec=null;
-      const after=profile(),previousIds=new Set(before.available_steps.map(e=>e.event_id));const result={...prediction,applied:true,event_id:row.event_id,record_id:id,title:events.find(e=>e.event_id===row.event_id).title,target_before:before.goal,target_after:after.goal,goal_snapshot:after.goal,unlocks:after.available_steps.filter(e=>!previousIds.has(e.event_id)),record:structuredClone(row)};outcomes.set(id,result);return structuredClone(result);
+      row.status='completed';row.completion_pct=100;row.session_date=row.date;row.date=asof;row.completed_at=asof;rec=null;
+      const event=events.find(e=>e.event_id===row.event_id),reward=companion.award(event,row,prediction.changes);
+      const after=profile(),previousIds=new Set(before.available_steps.map(e=>e.event_id));const result={...prediction,applied:true,event_id:row.event_id,record_id:id,title:event.title,target_before:before.goal,target_after:after.goal,goal_snapshot:after.goal,unlocks:after.available_steps.filter(e=>!previousIds.has(e.event_id)),record:structuredClone(row),reward,gamification:companion.view()};outcomes.set(id,result);return structuredClone(result);
     }
     if(route==='/api/hr/employees')return {employees:people.map(({employee_id,full_name,role,grade,department})=>({employee_id,full_name,role,grade,department}))};
     if(route==='/api/hr/users')return {user:{username:body.username,role:'employee',employee_id:body.employee_id}};
     if(route==='/api/hr/overview')return overview(url.searchParams);
+    if(route==='/api/hr/import/starter'){if(user.role!=='hr')throw new ApiError('У вашей учётной записи нет доступа.',403);throw new ApiError('Стартовый набор доступен при подключении к локальному серверу. Предпросмотр не загружает реальные файлы.',409);}
     if(route==='/api/hr/import/validate')return {valid:true,batch_id:'DEMO_BATCH',counts:{added:1,updated:0,skipped:0},conflicts:[],errors:[]};
     if(route==='/api/hr/import/apply'){loaded=true;return {counts:{added:1,updated:0,skipped:0},employee_ids:['DEMO_PERSON'],account_instructions:'Это предпросмотр: реальные данные и аккаунты не создаются.'};}
     if(route==='/api/hr/settings/ai'&&method==='GET')return {providers:{openai:{configured:false},nvidia:{configured:false}},primary_provider:'openai',fallback_provider:'nvidia'};
