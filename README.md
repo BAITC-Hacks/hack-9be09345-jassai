@@ -109,3 +109,8 @@ uv run python scripts/check_dataset.py "C:\путь\к\career_quest_dataset"
 Изолированный предпросмотр UI: `python scripts/preview_ui.py`, затем `http://127.0.0.1:8765/?preview=employee` или `?preview=hr`. Вымышленные примеры явно помечены; изменения не сохраняются, API не вызывается. Это не запуск полного приложения.
 
 Тесты интерфейса: `node --test tests/*.test.mjs`. Node.js не требуется для пользовательского запуска через Python/launcher.
+
+
+## Halyk UI/UX
+
+Обновлён интерфейс по согласованному ТЗ: личный кабинет, прогноз результата, навыки и история, каталог с фильтрами, HR и импорт. Реализация и границы: [docs/HALYK_REDESIGN.md](docs/HALYK_REDESIGN.md). Проверки: [docs/FRONTEND_TEST_RESULTS.md](docs/FRONTEND_TEST_RESULTS.md).

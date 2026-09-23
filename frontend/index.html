@@ -5,8 +5,9 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="light">
   <meta name="referrer" content="no-referrer">
-  <title>Career Quest · Ваш следующий шаг</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='12' fill='%23185143'/%3E%3Cpath d='M10 28V18h7v10m6 0V10h7v18' stroke='%23cfef94' stroke-width='3' fill='none'/%3E%3C/svg%3E">
+  <meta name="theme-color" content="#00805f">
+  <title>Halyk Career Quest · Ваш следующий шаг</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='12' fill='%2300805f'/%3E%3Cpath d='M12 12v16m16-16v16M12 20h16' stroke='white' stroke-width='3.5' stroke-linecap='round'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="/static/styles.css">
   <script type="module" src="/static/app.js"></script>
 </head>
@@ -15,18 +16,29 @@
   <div id="preview-banner" hidden></div>
   <div class="shell">
     <aside class="sidebar">
-      <a class="brand" href="#home" aria-label="Career Quest — главная"><span class="brand-mark" aria-hidden="true">↗</span><span>career<span class="brand-light">quest</span><small>РАЗВИТИЕ СО СМЫСЛОМ</small></span></a>
-      <div class="workspace-label">ЛИЧНОЕ ПРОСТРАНСТВО</div>
+      <a class="brand" href="#home" aria-label="Halyk Career Quest — главная"><span class="brand-wordmark">Halyk<span class="brand-dot" aria-hidden="true"></span></span><span class="brand-product">Career Quest</span></a>
       <nav id="navigation" aria-label="Основная навигация"></nav>
-      <div class="sidebar-bottom"><div class="sidebar-note"><span class="tiny-dot"></span> Маленькие шаги.<br>Большие возможности.</div><div id="identity"></div></div>
+      <div class="sidebar-bottom"><div class="sidebar-note">Ваш рост.<br><strong>Ваш следующий шаг.</strong></div><div id="identity"></div></div>
     </aside>
     <div class="workspace">
-      <header class="topbar"><span id="breadcrumb">Ваш следующий шаг</span><div class="topbar-right"><span class="date" id="as-of"></span><span class="local-badge"><span class="tiny-dot"></span> Локальное пространство</span><button id="logout" class="text-button" hidden>Выйти</button></div></header>
+      <header class="topbar">
+        <span id="breadcrumb">Карьерное развитие</span>
+        <div class="topbar-right">
+          <span class="date" id="as-of"></span>
+          <button type="button" class="icon-button notification-button" data-action="notifications" aria-label="Уведомления"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg></button>
+          <button type="button" class="language-button" data-action="language" aria-label="Язык интерфейса: русский">RU <span class="muted">/ KZ</span></button>
+          <span class="topbar-divider" aria-hidden="true"></span>
+          <span id="top-name" class="top-name"></span><span class="avatar" id="top-avatar" aria-hidden="true">CQ</span>
+          <button id="logout" type="button" class="icon-button" aria-label="Выйти" title="Выйти" hidden><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4M14 8l4 4-4 4M8 12h13"/></svg></button>
+        </div>
+      </header>
       <main id="main" tabindex="-1"><div class="loading" role="status">Открываем пространство…</div></main>
-      <footer>Career Quest <span>Осознанное развитие · JassAI / HackAlem</span></footer>
+      <footer><span>Halyk Career Quest</span><span>Развивайтесь. Растите. Вместе.</span></footer>
     </div>
   </div>
   <div id="notice" role="status" aria-live="polite" hidden></div>
   <dialog id="goal-dialog" aria-labelledby="goal-dialog-title"></dialog>
+  <dialog id="detail-dialog" class="drawer" aria-labelledby="detail-title"></dialog>
+  <dialog id="overlay-dialog" aria-labelledby="overlay-title"></dialog>
 </body>
 </html>
