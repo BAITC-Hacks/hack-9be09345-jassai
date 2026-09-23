@@ -7,6 +7,7 @@ from app.auth import initialize_bootstrap
 from app.config import Settings
 from app.db import Database, revision
 from app.imports import apply_validated, validate_files
+from app.seed import seed_dataset
 
 
 def main():
@@ -26,6 +27,8 @@ def main():
         return
     db = Database(settings.data_dir / "careerquest.sqlite3")
     db.initialize()
+    if args.command == "init":
+        seed_dataset(db, settings.seed_data_dir)
     initialize_bootstrap(db, settings)
     if args.command == "init":
         print(json.dumps({"data_dir": str(settings.data_dir), "bootstrap_token_file": str(settings.data_dir / "setup-token.txt") if not settings.bootstrap_token else None}, ensure_ascii=False))
