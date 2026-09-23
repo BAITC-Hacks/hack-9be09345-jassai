@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createApi,ApiError} from '../web/api.js';
-import {escapeHtml,pct,validRecommendation,sourceLabel} from '../web/ui.js';
-import {employeeView,recommendationView,settingsView,importResult} from '../web/views.js';
-import {createPreview} from '../web/preview.js';
+import {createApi,ApiError} from '../frontend/api.js';
+import {escapeHtml,pct,validRecommendation,sourceLabel} from '../frontend/ui.js';
+import {employeeView,recommendationView,settingsView,importResult} from '../frontend/views.js';
+import {createPreview} from '../frontend/preview.js';
+import {createBackendAdapter,normalizeProfile,normalizeOverview,normalizeRecommendations} from '../frontend/backend.js';
 
 test('Imported strings cannot inject HTML into recommendation cards',()=>{
   const evil='<img src=x onerror=alert(1)>';
@@ -62,3 +63,28 @@ test('Preview completion is separate from real API and can refresh cards',async(
   assert.equal(completed.applied,true);assert.equal(repeated.applied,false);
   const rec=await mock('/api/me/recommendations',{method:'POST'});assert.equal(rec.source,'preview');assert.equal(rec.items.length,2);
 });
+
+const wireCatalog={skills:[{skill_id:'SK_A',name:'Architecture'}],role_profiles:[{role:'Engineer',grade:'Senior'}],events:[{event_id:'EV_A',title:'Architecture course',format:'self_paced'}]};
+const wireProfile={employee:{employee_id:'E1',full_name:'Test',role:'Engineer',grade:'Middle'},as_of_date:'2026-10-01',trajectory:{coverage_pct:50,critical_gaps:[{}],target:{goal:{target_role:'Engineer',target_grade:'Senior'},source:'suggested_next_grade'},skills:[{skill_id:'SK_A',current:2,required:4,critical:true}]},history:[{record_id:'R1',event_id:'EV_A',status:'in_progress',date:'2026-10-01'}],available_steps:[{event_id:'EV_A'}],no_step_reasons:{}};
+test('Published backend profile preserves server values and maps goal/history',()=>{
+  const result=normalizeProfile(wireProfile,wireCatalog);assert.equal(result.coverage_pct,50);assert.equal(result.goal.source,'suggested');assert.equal(result.history[0].title,'Architecture course');assert.equal(result.history[0].can_complete,true);assert.deepEqual(result.skills,wireProfile.trajectory.skills);
+});
+test('Backend recommendation facts come from event, not generated numbers',()=>{
+  const result=normalizeRecommendations({mode:'ai',recommendations:[{event_id:'EV_A',factors:['one','two','three'],event:{event_id:'EV_A',format:'online',next_session:'2026-10-10',activity_record_id:'R1',expected_gains:[{skill_id:'SK_A',before:2,after:3}]}}]},wireProfile,wireCatalog);
+  assert.equal(result.items[0].can_complete,false);assert.equal(result.items[0].record_id,'R1');assert.equal(result.items[0].gains[0].name,'Architecture');assert.equal(result.source,'ai');
+});
+test('HR adapter preserves denominators/statuses and separates goal absence',()=>{
+  const result=normalizeOverview({employees_without_step:[{employee_id:'E1',goal:null,reasons:{goal_not_set:4}}],skill_deficits:[{employees_with_gap:2,target_population:8,gap_pct:25,critical_gaps:1}],participation:[{records:5,statuses:{completed:3}}]});
+  assert.equal(result.skill_gaps[0].denominator,8);assert.equal(result.participation[0].completed,3);assert.equal(result.no_next_step[0].reason_message,'Цель не задана');
+});
+test('Backend adapter uses actual setup/login routes and completion event ID',async()=>{
+  const calls=[];const raw=async(path,options={})=>{calls.push({path,...options});if(path==='/api/catalog')return wireCatalog;if(path==='/api/me')return wireProfile;if(path.endsWith('/complete'))return {changes:[{skill_id:'SK_A',before:2,after:3}],profile:wireProfile};return {};};
+  const api=createBackendAdapter(raw);await api('/api/setup/bootstrap',{body:{setup_token:'t',username:'hr',password:'test-only'}});assert.equal(calls[0].path,'/api/setup');assert.equal(calls[0].body.token,'t');assert.equal(calls[1].path,'/api/auth/login');
+  await api('/api/me');await api('/api/me/activities/R1/complete',{method:'POST',idempotencyKey:'fixed'});const request=calls.at(-1);assert.equal(request.path,'/api/me/activities/EV_A/complete');assert.deepEqual(request.body,{activity_record_id:'R1'});assert.equal(request.idempotencyKey,'fixed');
+});
+test('Backend multipart uses repeated files and aggregates nested report counts',async()=>{
+  const api=createBackendAdapter(async(path,options)=>{assert.equal(options.body.getAll('files').length,2);assert.equal(options.body.get('mode'),'add');return {valid:true,counts:{employees:{added:2},history:{added:3,skipped:1}}};});
+  const body=new FormData();body.append('employees.json',new Blob(['{}']),'employees.json');body.append('activity_history.csv',new Blob(['a']),'activity_history.csv');body.set('mode','add');
+  const result=await api('/api/hr/import/validate',{body});assert.deepEqual(result.counts,{added:5,updated:0,skipped:1});
+});
+

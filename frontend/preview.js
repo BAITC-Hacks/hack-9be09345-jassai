@@ -21,6 +21,8 @@ export function createPreview(mode='employee'){
     if(path==='/api/me/recommendations'){rec=recommendation();if(completed)rec.items=rec.items.slice(1);return structuredClone(rec);}
     if(path==='/api/me/activities'){started=true;rec=recommendation();return {record_id:'DEMO_RECORD',status:'in_progress'};}
     if(path.endsWith('/complete')){const applied=!completed;completed=true;return {applied,changes:[{name:'System Design',before:2,after:3}],coverage_before:72,coverage_after:76};}
+    if(path==='/api/hr/employees')return {employees:[{employee_id:'DEMO_PERSON',full_name:'Алексей · пример',role:'Backend Engineer',grade:'Middle',department:'Разработка'}]};
+    if(path==='/api/hr/users')return {user:{username:body.username,role:'employee',employee_id:body.employee_id}};
     if(path==='/api/hr/overview')return {employee_count:8,no_step_count:2,period:{from:'2024-10-01',to:'2026-09-30'},skill_gaps:[{name:'System Design',count:3,denominator:5,percentage:60,critical_count:2},{name:'Communication',count:2,denominator:8,percentage:25,critical_count:0}],no_next_step:[{employee_id:'DEMO_PERSON',full_name:'Сотрудник · пример',goal_label:'Data Analyst · Middle',reason:'audience'}],participation:[{title:'Проектирование систем',completed:3,in_progress:2,dropped:1,no_show:0,declined:1,overdue:0,total:7}]};
     if(path==='/api/hr/import/validate')return {valid:true,batch_id:'DEMO_BATCH',counts:{added:1,updated:0,skipped:0},conflicts:[],errors:[]};
     if(path==='/api/hr/import/apply'){loaded=true;return {counts:{added:1,updated:0,skipped:0},employee_ids:['DEMO_PERSON'],account_instructions:'Это предпросмотр: реальные аккаунты не создаются.'};}

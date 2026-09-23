@@ -1,136 +1,115 @@
-# Часть C — подключение интерфейса к A/B
+# Часть C: интеграция с A и настройки для B
 
-Статус: реализован frontend. Контракт ниже предложен C; пока backend A/B не подключён, совместимость и настоящий AI не считаются проверенными. Все пути относительны origin локального приложения. Никаких запросов из браузера к OpenAI/NVIDIA.
+## Статус
 
-## Подключение за несколько минут
+Интерфейс находится в `frontend/` — стандартной папке, которую уже обслуживает backend A. Проверен с A на коммите `470aebb`: вход/выход, профиль, каталог допустимых шагов, начало/завершение, пересчёт, HR и импорт нового ID через браузер. Серверные файлы A не изменены.
 
-1. Отдавать `web/index.html` на `/`, каталог `web/` как локальную статику (CSS/JS — по URL из HTML). API маршруты зарегистрировать раньше catch-all static mount.
-2. Пример FastAPI после объявления API: `app.mount('/', StaticFiles(directory='web', html=True), name='web')`. Путь вычислять от расположения проекта, не текущей директории launcher. Директории БД и исходные датасеты не монтировать.
-3. Реализовать перечисленные ниже DTO. Если у A уже другой контракт — изменить адаптацию в `web/app.js`/`web/api.js`, не создавать второй сервер.
-4. Сессия: HttpOnly cookie, SameSite, серверные проверки Origin/CSRF. Сервер возвращает csrf_token через session; UI отправляет X-CSRF-Token. Проверки ролей в UI только для удобства, права обеспечивает A на каждом маршруте.
-5. Launcher передаёт токен: `http://127.0.0.1:PORT/#setup_token=TOKEN`. UI забирает его в память и сразу удаляет из адреса. После bootstrap токен гасит сервер. Bootstrap создаёт сессию HR; если A выбирает иной процесс — согласовать адаптацию.
+Основной HTTP-контракт — [API_CONTRACT.md](API_CONTRACT.md). `frontend/backend.js` преобразует его ответы в представление UI. Названия полей внутри views.js не являются новым обязательным контрактом сервера.
 
-## Предпросмотр до интеграции
+Настоящие вызовы OpenAI/NVIDIA и защищённое хранение ключей — часть B. Их настройка подготовлена в интерфейсе, но пока backend не предоставляет маршруты настроек, поля ключей отключены с явным сообщением. `/ready.ai_configured` означает наличие callable, а не успешную проверку ключа.
 
-Из корня репозитория при наличии Python: `python -m http.server 8765 --bind 127.0.0.1 --directory web`.
+## Подключение и предпросмотр
+
+A уже отдаёт `frontend/index.html` на `/`, ресурсы — на `/static/`. Не нужно менять app/main.py, устанавливать frontend-зависимости или запускать отдельный Node-сервер.
+
+Запуск backend — по основному README. Альтернативная директория UI задаётся `CAREERQUEST_STATIC_DIR`.
+
+Для изолированного предпросмотра без backend:
+
+```powershell
+python scripts/preview_ui.py
+```
 
 - `http://127.0.0.1:8765/?preview=employee` — сотрудник.
 - `http://127.0.0.1:8765/?preview=hr` — HR, импорт, настройки.
-- `http://127.0.0.1:8765/?preview=setup` — первый запуск.
-- `http://127.0.0.1:8765/?preview=login` — вход, произвольные вымышленные данные.
+- `http://127.0.0.1:8765/?preview=setup` — первоначальная настройка.
+- `http://127.0.0.1:8765/?preview=login` — форма входа.
 
-Яркая плашка обозначает предпросмотр. Данные полностью вымышленные, не взяты из датасета организаторов. Перезагрузка сбрасывает изменения. Ключи в предпросмотре не принимаются. Без параметра preview интерфейс требует настоящий API и НЕ подменяет его fixtures при ошибках. Это команда предпросмотра для разработчика, не обещание готового пользовательского launcher.
+Предпросмотр помечен плашкой, содержит независимо вымышленные данные, не вызывает AI, не принимает ключи и не сохраняет изменения после перезагрузки. Ошибка настоящего API никогда не включает preview. На защите URL должен быть без `preview`.
 
-## Общий ответ ошибки
+Проверки C: `node tests/frontend.test.mjs`. Node нужен только разработчику для тестов.
 
-HTTP 4xx/5xx с JSON:
+## Что адаптировано к API A
 
-```json
-{"error":{"code":"validation_failed","message":"Исправьте ошибки файла"},"errors":[{"file":"employees.json","object":"NEW_ID","field":"skills.SK_X","message":"Уровень должен быть от 0 до 5"}]}
-```
+| UI | Реальный запрос |
+|---|---|
+| Готовность / мастер | GET /ready |
+| Создание HR | POST /api/setup {token,username,password}, затем POST /api/auth/login |
+| Восстановление сессии | GET /api/auth/session; CSRF из ответа |
+| Профиль / цели | GET /api/me + GET /api/catalog |
+| Изменить цель | PATCH /api/me/goal {career_goal:{target_role,target_grade}} |
+| Начать активность | POST /api/me/activities/{event_id}/start {session_date?} |
+| Завершить запись участия | POST /api/me/activities/{event_id}/complete {activity_record_id} + Idempotency-Key |
+| HR-обзор | GET /api/hr/overview |
+| Список / просмотр профиля | GET /api/hr/employees и GET /api/hr/employees/{id} |
+| Создать доступ | POST /api/hr/users {username,password,role:"employee",employee_id} |
+| Проверка импорта | POST /api/hr/import/validate, повторяемое multipart-поле files, mode |
+| Применение импорта | POST /api/hr/import/apply {batch_id} |
+| Рекомендации | POST /api/me/recommendations; карточки из recommendations[].event и factors |
 
-422 поддерживает также стандартный FastAPI detail[]. Не возвращать stack trace, ключи, пароли или полный запрос к LLM.
+UI сохраняет числа trajectory и HR-срезов сервера. Процент полосы отдельного навыка — только визуальное отношение current/required; общий coverage, eligibility и прирост не пересчитываются браузером. История разворачивается для показа новых записей сверху, названия берутся из каталога.
 
-## Setup и session
+Начало сервер A делает безопасным повтором существующей активной записи. Завершение использует UUID в sessionStorage до успешного ответа; повтор после сетевой ошибки сохраняет тот же ключ. Сервер проверяет владение, транзакцию и идемпотентность. Для scheduled-активности UI отключает завершение до даты среза; сервер повторно проверяет дату.
 
-- `GET /api/setup/status`: `{setup_required: bool, dataset_loaded: bool, as_of_date: "2026-10-01"|null, ai_status: "ready"|"not_configured"}`.
-- `POST /api/setup/bootstrap`: `{username,password,setup_token}` → создаёт HR и cookie-сессию; повтор закрыт.
-- `POST /api/auth/login`: `{username,password}` → cookie-сессия.
-- `POST /api/auth/logout`: `{}` → уничтожить сессию.
-- `GET /api/auth/session`: `{user:{user_id,username,display_name,role:"employee"|"hr",employee_id?},csrf_token}`; без сессии 401.
+Кэш карточек в памяти UI сохраняется только при неизменном полученном профиле и каталоге; серверный кэш A остаётся источником проверки актуальности. Обновление страницы не вызывает LLM автоматически. После завершения на главном экране UI сохраняет успешный результат отдельно от возможного отказа следующей AI-рекомендации.
 
-## Профиль и цель
+Форма импорта не применяет партию при смене файла/режима после проверки. Если пользователь меняет файлы во время запроса, старый ответ не становится разрешением применения. Сервер A повторно проверяет revision при apply.
 
-`GET /api/me`, `GET /api/hr/employees/{employee_id}` возвращают одинаковую форму (HR только читает):
+## Первоначальная настройка и профиль жюри
 
-```json
-{
-  "employee":{"employee_id":"DEMO","full_name":"Пример","role":"Backend Engineer","grade":"Middle","tenure_months":32},
-  "goal":{"target_role":"Backend Engineer","target_grade":"Senior","source":"explicit"},
-  "goal_options":[{"target_role":"Backend Engineer","target_grade":"Senior"}],
-  "coverage_pct":72,
-  "critical_gap_count":2,
-  "completed_count":12,
-  "version":1,
-  "skills":[{"skill_id":"SK_SYSTEM_DESIGN","name":"System Design","current":2,"required":4,"critical":true}],
-  "history":[{"record_id":"R1","event_id":"EV_X","title":"Название","date":"2026-10-01","status":"in_progress","completion_pct":0,"can_complete":true}],
-  "recommendations":null
-}
-```
+Launcher: `http://127.0.0.1:PORT/#setup_token=TOKEN`. UI переносит токен из fragment в память и удаляет из адреса через replaceState. После успешного /api/setup автоматически входит созданным HR через /api/auth/login. Токен погашает A; повторный bootstrap не используется.
 
-Цель может быть null, source — explicit/suggested; список допустимых целей строит A из role_profiles. coverage_pct=null если нет требований. history — новые записи первыми. Рекомендации в GET только актуальные, иначе null; чтение профиля не вызывает новый LLM-запрос. Права HR на любые данные не означают право изменять активность от имени сотрудника.
+HR загружает первоначальные четыре файла. Дополнительный импорт UI запрашивает employees.json и activity_history.csv. API A разрешает также загрузку одного файла; форма C ориентирована на основной сценарий жюри с двумя файлами.
 
-`PATCH /api/me/goal`: `{target_role,target_grade}` → успех; сервер инвалидирует кэш, UI заново читает профиль и запрашивает рекомендации на главном экране.
+После импорта: «Профили и доступ» → выбрать сотрудника → задать отдельные логин/пароль → создать аккаунт → выйти из HR → войти сотрудником. HR-просмотр не позволяет выполнять действия от лица сотрудника.
 
-## Рекомендации
+## OpenAI/NVIDIA: предлагаемое дополнение B
 
-`POST /api/me/recommendations`: `{refresh:true}`. UI даёт 11 секунд на HTTP (10 серверной операции + передача ответа), не выполняет скрытых повторов. B должен ограничить весь путь, включая резерв, до 10 секунд.
+Следующие маршруты отсутствуют в исходном backend A; реализуются B или адаптируются в frontend/backend.js к его окончательному API.
+
+### GET /api/hr/settings/ai
 
 ```json
 {
- "status":"ready","source":"ai","provider":"openai","model_id":"configured-model","cached":false,"data_version":1,
- "items":[{
-   "event_id":"EV_X","title":"Название","format":"self_paced","duration_hours":6,
-   "session_date":null,"action":"start","record_id":null,"can_complete":true,
-   "gains":[{"skill_id":"SK_SYSTEM_DESIGN","name":"System Design","before":2,"after":3}],
-   "factors":[{"text":"Факт 1","fact_ids":["goal"]},{"text":"Факт 2","fact_ids":["gap"]},{"text":"Факт 3","fact_ids":["history"]}],
-   "alternative":null
- }]
+  "providers": {
+    "openai": {"configured": false, "model_id": ""},
+    "nvidia": {"configured": false, "model_id": ""}
+  },
+  "primary_provider": "openai",
+  "fallback_provider": "nvidia"
 }
 ```
 
-Числа и допустимость проверяет A/B. UI не отображает карточки с менее чем тремя непустыми факторами, но не может проверить их истинность. Ожидаемый прирост должен учитывать max_level. action=continue требует record_id. can_complete=false отключает выполнение до разрешения сервером. Для scheduled start выбранная сессия берётся из проверенной рекомендации; self_paced передаёт null.
+Никогда не возвращать api_key или его часть. model_id задаётся из реально доступного аккаунту списка; неподтверждённые модели UI не выбирает автоматически.
 
-Пустые статусы: no_goal, goal_achieved, no_candidates; при no_candidates `reasons:[{code:"audience"|"prerequisites"|"no_gain"|"no_sessions"|"goal_outside_catalog"}]`.
-
-Резерв по правилам: `source:"fallback", reason:"timeout"|"not_configured"|"unavailable"`, проверенные items. source ai только после успешного проверенного вызова. source preview используется исключительно локальным предпросмотром.
-
-## Активности
-
-- `POST /api/me/activities`: `{event_id,session_date}` + `Idempotency-Key` → `{record_id,status}`.
-- `POST /api/me/activities/{record_id}/complete`: `{}` + `Idempotency-Key` → `{applied:true|false,changes:[{skill_id,name,before,after}],coverage_before,coverage_after}`.
-
-После успешного выполнения UI перечитывает профиль; отказ последующего AI не отменяет выполнение. Ключ повтора сохраняется в sessionStorage только для незавершённого запроса и удаляется после успеха. Сервер обеспечивает идемпотентность, владение записью, транзакцию и запрет повторного завершения даже с новым ключом. EV_036: отдельный record_id на отдельное посещение. При повторной регистрации сервер возвращает существующую активную запись или контролируемый конфликт.
-
-## Импорт
-
-`POST /api/hr/import/validate`: multipart поля `employees.json`, `activity_history.csv`; initial дополнительно `skills.json`,`events.json`; `kind=initial|additional`, `mode=add|update`.
-
-Ответ: `{valid,batch_id,counts:{added,updated,skipped},errors:[],conflicts:[{id,message}]}`. valid=true только если сервер разрешает применение с выбранным режимом; конфликты в режиме add не должны давать valid=true. batch_id привязан к файлам, режиму и версии состояния. UI снимает результат валидации после изменения файла/режима.
-
-`POST /api/hr/import/apply`: `{batch_id,mode}` + Idempotency-Key. Ответ: `{counts:{added,updated,skipped},employee_ids:[],account_instructions?}`. Применение атомарно и повторно проверяет конфликты.
-
-**Обязательное согласование A:** как новый сотрудник жюри получает аккаунт. UI умеет открыть HR-read-only профиль по возвращённому ID, но завершение требует входа сотрудника. Статический переключатель employee_id без авторизации не вводить.
-
-## HR
-
-`GET /api/hr/overview`:
+### POST /api/hr/settings/ai
 
 ```json
-{
- "employee_count":200,"no_step_count":0,
- "period":{"from":"2024-10-01","to":"2026-09-30"},
- "skill_gaps":[{"skill_id":"SK_X","name":"Навык","count":12,"denominator":40,"percentage":30,"critical_count":4}],
- "no_next_step":[{"employee_id":"E_X","full_name":"Имя","goal_label":"Роль · Грейд","reason":"audience","reason_message":"Нет мероприятия для текущей роли"}],
- "participation":[{"event_id":"EV_X","title":"Название","completed":1,"in_progress":2,"dropped":0,"no_show":0,"declined":0,"overdue":0,"total":3}]
-}
+{"provider":"openai","model_id":"configured-model","api_key":"entered-secret","persist":false}
 ```
 
-Знаменатель skill_gaps — сотрудники, у которых навык требуется целевым профилем. no_step_count — число сотрудников с дефицитом без доступного шага, не все Lead без цели и не сотрудники с покрытой целью. participation — количество записей истории за указанный период.
+Отсутствующее api_key означает оставить ранее настроенный ключ. Короткий тест без датасета → `{valid:true,latency_ms}`. Сохранять только после успешной проверки. persist=false — память процесса; true — DPAPI/Credential Manager, не plaintext JSON. Если защищённое хранилище недоступно, вернуть понятную ошибку. UI очищает поле ключа, не пишет его в localStorage/sessionStorage/логи и направляет запрос только локальному origin.
 
-## OpenAI и NVIDIA — интерфейс готов, исполнение B
+### PATCH /api/hr/settings/ai/policy
 
-- `GET /api/hr/settings/ai`: `{providers:{openai:{configured,model_id,latency_ms?},nvidia:{configured,model_id,latency_ms?}},primary_provider,fallback_provider}`. Никогда не возвращать секрет или его часть.
-- `POST /api/hr/settings/ai`: `{provider:"openai"|"nvidia",model_id,api_key?,persist:bool}`. Отсутствующий api_key означает сохранить текущий; пустую строку UI не отправляет. Короткая проверка без датасета → `{valid:true,latency_ms}` либо контролируемая ошибка. Сохранение только после успешной проверки. persist=false — память процесса; persist=true — Windows DPAPI/Credential Manager, не plaintext JSON. При недоступности защищённого хранилища вернуть ошибку, не сохранять открыто.
-- `PATCH /api/hr/settings/ai/policy`: `{primary_provider,fallback_provider:null|"openai"|"nvidia",total_timeout_ms:10000}`. Основной и резервный должны отличаться, быть настроены и поддерживать модель.
+```json
+{"primary_provider":"openai","fallback_provider":"nvidia","total_timeout_ms":10000}
+```
 
-Не выполнять два API-запроса на каждую рекомендацию автоматически. Основной провайдер — один; резерв использовать в оставшемся общем бюджете после быстрого отказа. Для сравнения скорости B отдельно выполняет небольшую одинаковую выборку запросов. $50 на аккаунте — сообщённый бюджет, не известный приложению текущий баланс. Не объединять ключи разных участников и не ротировать их ради обхода лимитов.
+Основной и резервный различаются. Фактический callable B должен укладываться в тайм-аут A (максимум 9 секунд), оставляя время серверной проверки и HTTP до общего требования 10 секунд. Значение UI не может расширять лимит сервера. При невозможности включить режим вернуть ошибку.
 
-Ускорение: короткий контекст без ФИО, только допустимые кандидаты, небольшой структурированный ответ с 1–3 шагами, async HTTP, кэш по версии профиля/цели/истории/каталога/модели/prompt, без повторных вызовов на чтение страницы. Конкретную модель выбрать по доступности ключа и замерам качества/латентности; UI не захардкоживает неподтверждённый model ID.
+B подключает `CAREERQUEST_RECOMMENDER=app.ai.provider:recommend` по контракту A. Ответы A в mode=ai отображаются как AI только после серверной проверки. Ошибки 503/504/502 показываются явно. Если B добавит резерв по правилам, он должен возвращать source/mode с явным отличием от AI и совместимые проверенные факты. Не возвращать fallback через callable как успешный AI: текущий A пометит его mode=ai.
 
-Официальные источники проверены 23.09.2026:
+## Скорость и кредиты
 
+Один основной вызов на рекомендацию; не посылать два запроса по умолчанию. Второй провайдер полезен как резерв при быстром отказе в оставшемся общем бюджете. Короткий контекст без ФИО, допустимые кандидаты, структурированный ответ на 1–3 шага, async HTTP и кэш по версиям данных/модели/prompt. Вызов проверки ключа не является замером полного подбора.
+
+$50 OpenAI и $50 NVIDIA — заявленные пользователем кредиты каждого аккаунта, не известный приложению текущий баланс. Ключи разных участников не объединяются и не ротируются для обхода лимитов. Остаток проверяется у провайдера.
+
+До доступного ключа и замеров конкретной модели нельзя обещать задержку. B фиксирует модель, число запросов, холодный/тёплый кэш, медиану и максимум; первый запуск окружения считается отдельно.
+
+Официальные источники, проверенные 23.09.2026:
 - https://developers.openai.com/api/docs/guides/structured-outputs
 - https://docs.api.nvidia.com/nim/re/reference/llm-apis
 
-У NVIDIA документирован `https://integrate.api.nvidia.com/v1/chat/completions`; OpenAI поддерживает структурированный ответ по JSON Schema на совместимых моделях. Поддержку response_format у конкретной NVIDIA-модели проверяет B; совместимый endpoint не гарантирует одинаковые параметры всех моделей.
+NVIDIA документирует `https://integrate.api.nvidia.com/v1/chat/completions`. OpenAI поддерживает JSON Schema на совместимых моделях. Совместимый endpoint NVIDIA не гарантирует одинаковые параметры response_format у всех моделей.

@@ -1,17 +1,19 @@
 import {createApi,ApiError} from './api.js';
 import {escapeHtml as e,date} from './ui.js';
 import * as view from './views.js';
+import {createBackendAdapter} from './backend.js';
 
 const main=document.querySelector('#main');
 const params=new URLSearchParams(location.search);
 const preview=params.get('preview');
-const state={session:null,status:{},profile:null,completion:null,batch:null,routeVersion:0,csrf:null,settings:null};
+const state={session:null,status:{},profile:null,completion:null,batch:null,routeVersion:0,importVersion:0,csrf:null,settings:null};
 // The launcher opens /#setup_token=...; consume the token without retaining it in the URL.
 let setupToken=new URLSearchParams(location.hash.slice(1)).get('setup_token');
 if(setupToken) history.replaceState(null,'',location.pathname+location.search+'#setup');
 let mock=null;
 if(preview){const module=await import('./preview.js');mock=module.createPreview(preview);const banner=document.querySelector('#preview-banner');banner.hidden=false;banner.innerHTML='ПРЕДПРОСМОТР · вымышленные примеры, без сервера и вызовов AI. Изменения сбрасываются при обновлении. <a href="?preview=employee">Сотрудник</a><a href="?preview=hr">HR</a><a href="?preview=setup">Первый запуск</a><a href="?preview=login">Вход</a>';}
-const api=createApi({getCsrf:()=>state.csrf,mock});
+const rawApi=createApi({getCsrf:()=>state.csrf,mock});
+const api=preview?rawApi:createBackendAdapter(rawApi);
 let noticeTimer;
 function notice(text){const target=document.querySelector('#notice');target.textContent=text;target.hidden=false;clearTimeout(noticeTimer);noticeTimer=setTimeout(()=>target.hidden=true,7000);}
 function formError(form,error){form.querySelector('.form-error').innerHTML=view.errorView(error);}
@@ -19,7 +21,7 @@ function keyFor(action,id){const key=`cq:pending:${state.session?.user_id}:${act
 function resetPrivateState(){state.session=null;state.csrf=null;state.profile=null;state.settings=null;state.completion=null;state.batch=null;document.querySelector('#goal-dialog').close();document.querySelector('#goal-dialog').innerHTML='';}
 function navigation(){
   const hr=state.session?.role==='hr';
-  const links=state.session?(hr?[['hr','◎','Обзор команды'],['import','⇧','Импорт данных'],['settings','⚙','Настройки AI']]:[['home','▦','Мой путь'],['skills','◇','Мои навыки'],['history','◷','История']]):[];
+  const links=state.session?(hr?[['hr','◎','Обзор команды'],['employees','♧','Профили и доступ'],['import','⇧','Импорт данных'],['settings','⚙','Настройки AI']]:[['home','▦','Мой путь'],['skills','◇','Мои навыки'],['catalog','↗','Доступные шаги'],['history','◷','История']]):[];
   const route=location.hash.slice(1)||'home';
   document.querySelector('#navigation').innerHTML=links.map(([id,icon,text])=>`<a href="#${id}" class="${route===id||(route==='home'&&id==='hr')?'active':''}" ${route===id?'aria-current="page"':''}><span class="nav-icon" aria-hidden="true">${icon}</span>${text}</a>`).join('');
   const user=state.session;
@@ -31,7 +33,7 @@ function navigation(){
 async function loadSession(){const session=await api('/api/auth/session');state.session=session.user;state.csrf=session.csrf_token;}
 async function boot(){try{state.status=await api('/api/setup/status');if(!state.status.setup_required){try{await loadSession();}catch(error){if(error.status!==401)throw error;}}await renderRoute();}catch(error){navigation();main.innerHTML=view.heading('Career Quest','Не удалось открыть пространство','Проверьте, что локальный сервер запущен.')+view.errorView(error)+view.button('Повторить подключение','reconnect');}}
 async function renderRoute(){
-  const version=++state.routeVersion;state.batch=null;navigation();
+  const version=++state.routeVersion;state.importVersion++;state.batch=null;navigation();
   const raw=location.hash.slice(1)||'home';
   main.innerHTML='<div class="loading" role="status">Загружаем данные…</div>';
   try{
@@ -40,13 +42,14 @@ async function renderRoute(){
     const hr=state.session.role==='hr';
     let html;
     if(raw==='setup'){if(!hr)throw new ApiError('Настройка доступна HR.',403);html=view.setupView(state.status);}
-    else if(raw==='settings'){if(!hr)throw new ApiError('Настройки доступны HR.',403);const data=await api('/api/hr/settings/ai');if(version!==state.routeVersion)return;state.settings=data;html=view.settingsView(data);}
+    else if(raw==='settings'){if(!hr)throw new ApiError('Настройки доступны HR.',403);let data;try{data=await api('/api/hr/settings/ai');}catch(error){if(error.status!==404)throw error;data={not_connected:true};}if(version!==state.routeVersion)return;state.settings=data;html=view.settingsView(data);}
+    else if(raw==='employees'){if(!hr)throw new ApiError('Профили доступны HR.',403);html=view.employeesView(await api('/api/hr/employees'));}
     else if(raw==='import'){if(!hr)throw new ApiError('Импорт доступен HR.',403);html=view.importView(!state.status.dataset_loaded);}
-    else if((raw==='home'&&hr)||raw==='hr'){if(!hr)throw new ApiError('Обзор команды доступен HR.',403);if(!state.status.dataset_loaded){html=view.setupView(state.status);}else{html=view.hrView(await api('/api/hr/overview'));}}
+    else if((raw==='home'&&hr)||raw==='hr'){if(!hr)throw new ApiError('Обзор команды доступен HR.',403);if(!state.status.dataset_loaded){html=view.setupView(state.status);}else{const data=await api('/api/hr/overview');state.status.as_of_date=data.as_of_date||state.status.as_of_date;navigation();html=view.hrView(data);}}
     else if(raw.startsWith('employee/')){if(!hr)throw new ApiError('Просмотр других сотрудников доступен HR.',403);const id=decodeURIComponent(raw.slice(9));const profile=await api('/api/hr/employees/'+encodeURIComponent(id));if(version!==state.routeVersion)return;state.profile=profile;html=view.employeeView(profile,{readOnly:true});}
-    else if(['home','skills','history'].includes(raw)){const profile=await api('/api/me');if(version!==state.routeVersion)return;state.profile=profile;html=view.employeeView(profile,{section:raw,completion:state.completion});}
+    else if(['home','skills','history','catalog'].includes(raw)){const profile=await api('/api/me');if(version!==state.routeVersion)return;state.profile=profile;state.status.as_of_date=profile.as_of_date||state.status.as_of_date;navigation();html=raw==='catalog'?view.availableView(profile):view.employeeView(profile,{section:raw,completion:state.completion});}
     else {html=view.empty('Такой страницы нет','Вернитесь в своё рабочее пространство.','<a class="button" href="#home">На главную</a>');}
-    if(version===state.routeVersion)main.innerHTML=html;
+    if(version===state.routeVersion){main.innerHTML=html;if(raw==='settings'&&(state.settings?.not_connected||preview)){if(state.settings?.not_connected)main.insertAdjacentHTML('afterbegin','<div class="info">Настройки AI пока недоступны на сервере. Подключение должен завершить администратор приложения.</div>');for(const field of main.querySelectorAll('.provider-form input,.provider-form button,#ai-policy-form button'))field.disabled=true;}}
   }catch(error){if(version!==state.routeVersion)return;if(error.status===401){resetPrivateState();navigation();main.innerHTML=view.loginView();notice('Сессия завершена. Войдите снова.');}else{main.innerHTML=view.errorView(error)+view.button('Повторить','reload');}}
 }
 async function recommend(){
@@ -62,6 +65,7 @@ async function recommend(){
 }
 
 document.addEventListener('click',async event=>{
+  if(event.target.closest('.skip')){event.preventDefault();main.focus();return;}
   const control=event.target.closest('[data-action]');if(!control)return;
   const action=control.dataset.action;
   if(action==='close-goal'){document.querySelector('#goal-dialog').close();return;}
@@ -85,8 +89,8 @@ document.addEventListener('click',async event=>{
       const batch=state.batch,key=keyFor('import',batch.batch_id);
       const result=await api('/api/hr/import/apply',{method:'POST',body:{batch_id:batch.batch_id,mode:batch.mode},idempotencyKey:key.value,timeout:20000});
       key.clear();state.batch=null;
-      document.querySelector('#import-result').innerHTML=view.importResult(result,true);
-      state.status=await api('/api/setup/status');navigation();notice('Импорт завершён.');
+      const target=document.querySelector('#import-result');if(target)target.innerHTML=view.importResult(result,true);
+      state.status={...state.status,...await api('/api/setup/status')};navigation();notice('Импорт завершён.');
     }
   }catch(error){notice(error.message);if(error.status===401){resetPrivateState();await renderRoute();}}
   finally{if(control.isConnected)control.disabled=false;}
@@ -119,10 +123,17 @@ document.addEventListener('submit',async event=>{
       if(!location.hash||location.hash==='#home')await recommend();
     }
     if(form.id==='employee-search'){location.hash='employee/'+encodeURIComponent(fields.get('employee_id').trim());}
+    if(form.id==='create-user-form'){
+      const password=form.elements.password.value;form.elements.password.value='';
+      await api('/api/hr/users',{method:'POST',body:{username:fields.get('username'),password,role:'employee',employee_id:fields.get('employee_id')}});
+      form.reset();notice('Аккаунт сотрудника создан. Теперь можно войти под его логином.');
+    }
     if(form.id==='import-form'){
+      const validationVersion=++state.importVersion;
       state.batch=null;document.querySelector('#import-result').innerHTML='<div class="loading" role="status">Проверяем файлы и связи…</div>';
       fields.set('kind',form.dataset.initial==='true'?'initial':'additional');
       const result=await api('/api/hr/import/validate',{method:'POST',body:fields,timeout:20000});
+      if(validationVersion!==state.importVersion||!form.isConnected)return;
       state.batch=result.valid?{batch_id:result.batch_id,mode:fields.get('mode')}:null;
       document.querySelector('#import-result').innerHTML=view.importResult(result);
     }
@@ -145,7 +156,7 @@ document.addEventListener('submit',async event=>{
   finally{if(form.classList.contains('provider-form'))form.elements.api_key.value='';if(submit?.isConnected)submit.disabled=false;}
 });
 
-document.addEventListener('change',event=>{if(event.target.closest('#import-form')){state.batch=null;document.querySelector('#import-result').innerHTML='';}});
+document.addEventListener('change',event=>{if(event.target.closest('#import-form')){state.importVersion++;state.batch=null;document.querySelector('#import-result').innerHTML='';}});
 document.querySelector('#logout').addEventListener('click',async()=>{try{await api('/api/auth/logout',{method:'POST',body:{}});resetPrivateState();await renderRoute();}catch(error){notice(error.message);}});
 window.addEventListener('hashchange',()=>{document.querySelector('#goal-dialog').close();renderRoute();});
 await boot();
