@@ -81,6 +81,12 @@ HR создаёт аккаунт сотрудника: `POST /api/hr/users` JSON
 
 ## B — подключение AI
 
+В main подключён модуль B `app.ai.provider:recommend`; Windows launcher задаёт
+его при наличии защищённого ключа. Модель выбирает ID/типы факторов, провайдер
+материализует текст из проверенных фактов. UI отображает `reason`, включая
+сравнение альтернатив. Текущая настройка OpenAI — через launcher; HTTP-маршруты
+управления ключами и NVIDIA отсутствуют. Подробности: [B_IMPLEMENTATION.md](B_IMPLEMENTATION.md).
+
 Реализовать `async def recommend(context: dict) -> dict` и установить `CAREERQUEST_RECOMMENDER=app.ai.provider:recommend` перед стартом. Рекомендуется async HTTP-клиент. Синхронный callable также выполняется вне event loop, но его сетевые тайм-ауты обязан ограничить сам провайдер. Контекст — входные данные, не инструкции модели.
 
 Контекст содержит:

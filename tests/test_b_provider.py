@@ -136,6 +136,21 @@ def test_materializes_only_grounded_factors_and_alternative(context):
     assert all(len(f["text"]) <= 1500 for f in row["factors"])
 
 
+def test_alternative_comparison_does_not_reverse_recommendation_rank(context):
+    selection = choice()
+    second = deepcopy(selection["recommendations"][0])
+    second.update(event_id="EV_NEW_Y", alternative_event_id="EV_NEW_X")
+    selection["recommendations"].append(second)
+
+    rows = provider.materialize(selection, context, provider.candidate_facts(context))["recommendations"]
+
+    assert [row["event_id"] for row in rows] == ["EV_NEW_X", "EV_NEW_Y"]
+    assert "Приоритет 2" in rows[1]["reason"]
+    assert "альтернатива EV_NEW_X" in rows[1]["reason"]
+    assert "4 против 2" in rows[1]["reason"]
+    assert all("получила меньший приоритет" not in row["reason"] for row in rows)
+
+
 @pytest.mark.parametrize(
     "change",
     [

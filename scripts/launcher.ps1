@@ -10,7 +10,10 @@ param(
 
     # `launcher.cmd /disable-ai` removes only this app's DPAPI secret after a
     # confirmation and starts the labelled no-AI mode.
-    [switch]$DisableAi
+    [switch]$DisableAi,
+
+    # Prepare dependencies, start/check/stop the server without browser or AI calls.
+    [switch]$SmokeTest
 )
 
 # This script intentionally supports Windows PowerShell 5.1 as well as newer
@@ -124,9 +127,13 @@ function Test-OpenAiConfiguration {
                     }
                 }
             }
-            max_output_tokens = 24
+            max_output_tokens = 1024
             store = $false
-        } | ConvertTo-Json -Depth 10 -Compress
+        }
+        if ($Model -eq "gpt-6-luna") {
+            $payload.reasoning = @{ effort = "none" }
+        }
+        $payload = $payload | ConvertTo-Json -Depth 10 -Compress
         $response = Invoke-WebRequest `
             -UseBasicParsing `
             -Uri "https://api.openai.com/v1/responses" `
@@ -136,6 +143,9 @@ function Test-OpenAiConfiguration {
             -Body $payload `
             -TimeoutSec 9
         $responsePayload = $response.Content | ConvertFrom-Json
+        if ($responsePayload.status -ne "completed") {
+            return $false
+        }
         $outputText = ([string]$responsePayload.output_text).Trim()
         if ([string]::IsNullOrWhiteSpace($outputText)) {
             foreach ($message in @($responsePayload.output)) {
@@ -332,8 +342,8 @@ function Get-PinnedUv {
 }
 
 try {
-    if ($ConfigureAi -and $DisableAi) {
-        throw "Use either -ConfigureAi or -DisableAi, not both."
+    if (($ConfigureAi -and $DisableAi) -or ($SmokeTest -and ($ConfigureAi -or $DisableAi))) {
+        throw "Use one of -ConfigureAi, -DisableAi or -SmokeTest."
     }
     if ($env:OS -ne "Windows_NT") {
         throw "This launcher targets Windows 10/11. Use a verified platform-specific launch method elsewhere."
@@ -362,7 +372,11 @@ try {
         }
     }
 
-    $instanceRoot = Join-Path $env:LOCALAPPDATA "CareerQuest\instances\hack-9be09345-jassai"
+    $instanceRoot = if ([string]::IsNullOrWhiteSpace($env:CAREERQUEST_DATA_DIR)) {
+        Join-Path $env:LOCALAPPDATA "CareerQuest\instances\hack-9be09345-jassai"
+    } else {
+        [System.IO.Path]::GetFullPath($env:CAREERQUEST_DATA_DIR)
+    }
     $settingsDirectory = Join-Path $instanceRoot "settings"
     $logsDirectory = Join-Path $instanceRoot "logs"
     $runtimeDirectory = Join-Path $instanceRoot "runtime"
@@ -404,6 +418,10 @@ try {
             if ($ConfigureAi -or $DisableAi) {
                 throw "Stop the running Career Quest instance with Ctrl+C before changing its AI configuration."
             }
+            if ($SmokeTest) {
+                Write-LauncherLog "Launcher check passed: an existing managed instance is ready."
+                exit 0
+            }
             Write-LauncherLog "An existing Career Quest instance is ready; opening its browser tab."
             Open-CareerQuest -Port ([int]$state.port) -DataDirectory $instanceRoot
             exit 0
@@ -430,6 +448,7 @@ try {
 
     $uvPath = Get-PinnedUv -ManifestPath (Join-Path $ProjectRoot "scripts\uv-manifest.json") -ToolsDirectory $toolsDirectory
     $env:UV_CACHE_DIR = Join-Path $instanceRoot "uv-cache"
+    $env:UV_PYTHON_INSTALL_DIR = Join-Path $instanceRoot "python"
     $env:UV_PROJECT_ENVIRONMENT = $venvPath
     $env:UV_NO_PROGRESS = "1"
     Write-LauncherLog "Synchronizing the pinned Python environment from uv.lock."
@@ -442,7 +461,7 @@ try {
         throw "uv sync completed but the managed Python executable is missing."
     }
 
-    if ($skipAiSetup) {
+    if ($skipAiSetup -or $SmokeTest) {
         $apiKey = $null
         $script:ConfiguredModel = "gpt-6-luna"
     }
@@ -479,6 +498,7 @@ try {
             -WorkingDirectory $ProjectRoot `
             -RedirectStandardOutput $stdoutPath `
             -RedirectStandardError $stderrPath `
+            -WindowStyle Hidden `
             -PassThru
 
         # The child inherited the secret if configured. Clear it before any
@@ -510,6 +530,12 @@ try {
             throw "The server did not pass /ready within 30 seconds. Read '$stderrPath'."
         }
 
+        if ($SmokeTest) {
+            $null = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$port/" -TimeoutSec 5
+            $null = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$port/static/app.js" -TimeoutSec 5
+            Write-LauncherLog "Launcher check passed: server and UI are ready. AI and browser interaction were not tested."
+            exit 0
+        }
         Write-LauncherLog "Career Quest is ready; opening the browser."
         Open-CareerQuest -Port $port -DataDirectory $instanceRoot
         Write-Host "Career Quest is running. Keep this window open; press Ctrl+C to stop this instance."

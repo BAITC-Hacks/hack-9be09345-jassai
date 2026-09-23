@@ -86,7 +86,10 @@ def _comparison(chosen: dict, other: dict, factor: str, context: dict) -> str:
         detail = f"история по форматам {chosen['format']}: {_json(history.get(chosen['format'], {}))}; {other['format']}: {_json(history.get(other['format'], {}))}"
     else:
         detail = f"формат {chosen['format']} против {other['format']}; действие {chosen['action']} против {other['action']}"
-    return f"Альтернатива {other['event_id']} получила меньший приоритет в выборе модели. Сравниваемый компромисс: {detail}."
+    # An alternative may itself appear earlier in the ranked recommendations.
+    # Compare grounded facts without claiming a relative rank the schema does
+    # not establish for this pair.
+    return f"Для сравнения — альтернатива {other['event_id']}. Сравниваемый компромисс: {detail}."
 
 
 def selection_schema(ids: list[str]) -> dict:
@@ -244,6 +247,10 @@ async def recommend(context: dict) -> dict:
             }
         },
     }
+    # The default model supports non-reasoning mode; keep the small selection
+    # request within the shared deadline and leave custom model defaults alone.
+    if model == DEFAULT_MODEL:
+        request["reasoning"] = {"effort": "none"}
     try:
         async with asyncio.timeout(REQUEST_BUDGET):
             async with httpx.AsyncClient(

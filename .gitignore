@@ -15,6 +15,7 @@ data/
 dataset/
 artifacts/
 setup-token.txt
+*.dpapi
 .test-deps/
 .ui-test-data/
 .ui-test-fixtures/
